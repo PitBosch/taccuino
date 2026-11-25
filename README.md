@@ -94,7 +94,16 @@ Un'ora di riunione richiede circa 20–25 minuti di elaborazione in background a
 | distil-whisper large-v3 | — | **solo inglese**: escluso |
 | Parakeet v3, Canary, Cohere Transcribe, Fun-ASR-MLT | — | nessuna conversione OpenVINO pronta (servirebbe export manuale) |
 
-Il benchmark tra i candidati si lancia con `scripts/bench_asr.py`.
+Benchmark su Iris Xe (clip italiana di 2 min, finestre da 20 s, `scripts/bench_asr.py`):
+
+| modello | load | RTF | qualità osservata |
+|---|---|---|---|
+| Whisper large-v3-turbo int8 | 2,4 s | **0,13** | buona; a volte salta frasi pronunciate in fretta |
+| Qwen3-ASR 1.7B int8 (`circulus/…`) | 12,5 s | 0,45 | coglie più frasi, ma storpia di più i nomi propri (Florianópolis → "Firenopolis") |
+
+Whisper turbo resta il default (3,4× più veloce, qualità comparabile). Qwen3-ASR si può attivare con
+`taccuino config asr_model circulus/Qwen3-ASR-1.7B-int8-ov`. Attenzione: la conversione `paloik/…`
+ha un layout di file non compatibile con `ASRPipeline`.
 
 **Diarization.** sherpa-onnx è leggero (~35 MB), funziona offline ed è abbastanza veloce su CPU.
 Un'alternativa su GPU Intel è `pyannote-openvino` (pyannote 3.1 convertito in IR), ma richiede torch
