@@ -207,6 +207,7 @@ class Captions:
                 self.shown, self.fixed_shown = set(), set()
                 self.q.put(("answer", f"— nuova registrazione {mdir.name} —"))
             lt = self.lt
+            lt.watch()
             try:
                 with self.con.lock:
                     _, draft, trailing = lt.step()

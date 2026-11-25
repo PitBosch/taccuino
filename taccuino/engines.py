@@ -57,7 +57,12 @@ class ASR:
         cache = MODELS_DIR.parent / "ov_cache"  # kernel GPU compilati: il secondo avvio è molto più veloce
         cache.mkdir(parents=True, exist_ok=True)
         try:
-            self.pipe = cls(path, device, CACHE_DIR=str(cache))
+            props = {"CACHE_DIR": str(cache)}
+            if device.startswith("GPU"):
+                # senza questo il driver tiene un core al 100% in attesa attiva mentre la GPU lavora:
+                # stessa velocità, ~8× meno CPU (2,65 s → 0,34 s per chiamata su Iris Xe)
+                props.update(GPU_QUEUE_THROTTLE="LOW", GPU_HOST_TASK_PRIORITY="LOW")
+            self.pipe = cls(path, device, **props)
         except Exception:  # noqa: BLE001
             self.pipe = cls(path, device)
         self.language, self.vocabulary = language, vocabulary

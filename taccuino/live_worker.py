@@ -147,6 +147,7 @@ def run(mdir: str):
     cleaning = threading.Event()
     noting = threading.Event()
     last_speech = time.time()
+    watched = False
 
     def bg(ev: threading.Event, fn):
         ev.set()
@@ -167,7 +168,8 @@ def run(mdir: str):
             break
         lt.beat()
         try:
-            _, _, trailing = lt.step()
+            watched = lt.viewer_active()
+            _, _, trailing = lt.step(want_draft=watched)
         except Exception as e:  # noqa: BLE001
             print(f"live: {e}", flush=True)
             stop.wait(3)
@@ -181,7 +183,7 @@ def run(mdir: str):
                 Cleaner(lt).run()
                 notes.run()
             bg(noting, clean_then_note)
-        stop.wait(0.2)
+        stop.wait(0.25 if watched else 0.6)
     # fine call: ultima correzione e ultimo giro di appunti, poi esci (la pipeline finale fa il resto)
     for ev in (cleaning, noting):
         while ev.is_set():
