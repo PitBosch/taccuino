@@ -210,8 +210,7 @@ class Console:
             raw = " ".join(lines[i].text for i in range(len(lines)) if i not in fixed)
             self._draw(out if self.show_live else [], draft=(raw + " " + draft).strip())
             if lt.driving and not cleaning.is_set():
-                todo = Cleaner(lt).pending()
-                if todo and (time.time() - last_speech > 1.2 or len(todo) >= 6):
+                if Cleaner(lt).due(last_speech):
                     cleaning.set()
 
                     def work(lt=lt):

@@ -82,6 +82,7 @@ class Settings:
 
     # --- durante la call ---
     live_transcribe: bool = True     # trascrizione in streaming durante la call (processo separato)
+    live_clean_seconds: float = 120.0  # ogni quanto Haiku corregge le frasi trascritte (0 = solo a fine call)
     live_notes_minutes: float = 15.0  # ogni quanti minuti Claude aggiunge appunti alla nota (0 = mai)
     # a fine call: False = nota dalla trascrizione live (veloce, niente GPU); True = ritrascrive tutto con
     # diarization (speaker separati, più preciso, qualche minuto di GPU)

@@ -233,7 +233,7 @@ class Captions:
                     self.q.put(("fix", (i, fixed[i])))
             todo = [i for i in range(len(lines)) if i not in fixed]
             self.q.put(("draft", draft.strip()))
-            if lt.driving and todo and not cleaning.is_set() and (time.time() - last_speech > 1.2 or len(todo) >= 6):
+            if lt.driving and not cleaning.is_set() and Cleaner(lt).due(last_speech):
                 cleaning.set()
 
                 def clean(lt=lt):

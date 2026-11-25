@@ -327,10 +327,29 @@ RIGHE NUOVE:
 
 
 class Cleaner:
-    """Correzione con Haiku delle righe fissate ma non ancora corrette."""
+    """Correzione con Haiku delle righe fissate ma non ancora corrette, a blocchi (non a ogni frase)."""
+
+    _last: dict[str, float] = {}  # ultima correzione per riunione (per processo)
 
     def __init__(self, lt: LiveTranscript):
         self.lt = lt
+
+    def due(self, last_speech: float) -> bool:
+        """Correggere adesso? Ogni `live_clean_seconds` (in una pausa), o prima se il testo in attesa è tanto.
+        live_clean_seconds = 0: solo a fine call."""
+        every = self.lt.s.live_clean_seconds
+        if every <= 0:
+            return False
+        todo = self.pending()
+        if not todo:
+            return False
+        now = time.time()
+        last = Cleaner._last.setdefault(str(self.lt.mdir), now)
+        paused = now - last_speech > 1.2
+        return (now - last >= every and paused) or len(todo) >= 40
+
+    def mark(self):
+        Cleaner._last[str(self.lt.mdir)] = time.time()
 
     def pending(self) -> list[int]:
         done = self.lt.cleaned()
@@ -339,8 +358,9 @@ class Cleaner:
     def run(self) -> list[int]:
         """Corregge le righe in attesa; restituisce gli indici corretti. Se Claude fallisce, tiene il grezzo."""
         from .summarize import run_claude
+        self.mark()
         lines = self.lt.lines()
-        todo = self.pending()[:40]
+        todo = self.pending()[:60]
         if not todo:
             return []
         done = self.lt.cleaned()

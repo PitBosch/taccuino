@@ -46,7 +46,8 @@ Se `taccuino devices` non vede la GPU: `sudo usermod -aG render $USER` e poi rie
 
 Il daemon lancia per tutta la durata della call un **live worker** (processo separato, con Whisper caricato
 solo in quel momento):
-- trascrive in streaming il FLAC che si sta scrivendo e nelle pause fa correggere le frasi a Haiku;
+- trascrive in streaming il FLAC che si sta scrivendo; ogni `live_clean_seconds` (default 2 min, in una pausa)
+  Haiku corregge in blocco le frasi accumulate (i "Grazie." inventati li toglie già un filtro deterministico);
 - ogni `live_notes_minutes` (default 15) Haiku legge cosa si è detto e aggiunge **appunti mirati**
   (decisioni, azioni, numeri, date, problemi) alla nota della riunione, già nella **sottocartella** di
   `~/Documents/Taccuino` che sceglie lui alla prima passata;
@@ -178,6 +179,7 @@ Impostazioni (`taccuino config` le mostra tutte, `taccuino config KEY VALUE` le 
 | `num_speakers` | -1 | -1 = automatico; impostalo se sai quante persone ci sono |
 | `cluster_threshold` | 0.6 | più alto = meno speaker |
 | `final_transcribe` | false | true = a fine call ritrascrive tutto con diarization (più lento) |
+| `live_clean_seconds` | 120 | ogni quanto Haiku corregge le frasi della trascrizione live (0 = solo a fine call) |
 | `live_notes_minutes` | 15 | ogni quanti minuti Claude aggiunge appunti durante la call (0 = mai) |
 | `keep_audio_days` | 14 | 0 = cancella l'audio subito dopo l'elaborazione |
 

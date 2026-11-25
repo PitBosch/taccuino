@@ -174,8 +174,7 @@ def run(mdir: str):
             continue
         if trailing < 0.3:
             last_speech = time.time()
-        todo = Cleaner(lt).pending()
-        if todo and not cleaning.is_set() and (time.time() - last_speech > 1.2 or len(todo) >= 6):
+        if not cleaning.is_set() and Cleaner(lt).due(last_speech):
             bg(cleaning, Cleaner(lt).run)
         if notes.due() and not noting.is_set() and not cleaning.is_set():
             bg(noting, notes.run)
