@@ -117,6 +117,15 @@ Jira passa dal **connettore Atlassian già collegato a Claude Code** (nessun tok
 claude.ai → Impostazioni → Connettori → Atlassian e verifica con `claude mcp list`. Opzioni:
 `taccuino config jira_project CHIAVE` (vuoto = il tuo progetto personale), `jira_issue_type` (default Task).
 
+## Vocabolario dal vault Obsidian
+
+`taccuino vocabolario` fa compilare a Haiku il vocabolario (persone, progetti, aziende, sigle, gergo tecnico)
+dal tuo vault Obsidian, trovato da solo in home, Documenti o OneDrive (o `taccuino config vault_path …`).
+In locale si estraggono solo i *candidati* (titoli, [[link]], alias, #tag, nomi propri, sigle): il testo delle
+note non viene inviato. Lo usano Whisper (i 40 termini principali), la correzione, il segretario e le note.
+Il daemon lo rigenera da solo a riposo ogni `vocab_refresh_days` (default 7). `taccuino vocabolario --show`
+lo mostra; i termini in `taccuino config vocabulary "…"` si aggiungono in testa.
+
 ## Console
 
 Scrivi `taccuino` e si apre un'interfaccia in stile Claude Code sulla riunione in corso (o sull'ultima):

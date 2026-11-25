@@ -30,6 +30,8 @@ Non commentare la qualità della trascrizione e non scrivere che qualcosa "non �
 confuso per essere utile, semplicemente non annotarlo. Nelle azioni ometti "quando" se non è stato detto.
 Se nel transcript nuovo non c'è nulla che meriti un appunto, rispondi solo: NIENTE
 
+Vocabolario (grafia corretta di nomi e termini ricorrenti): {vocab}
+
 {folder_rule}
 Rispondi in questo formato (lingua della riunione):
 TITOLO: <titolo provvisorio, max 8 parole>
@@ -96,7 +98,8 @@ class LiveNotes:
         span = f"{fmt_ts(lines[0].start)}–{fmt_ts(lines[-1].end)}"
         new = "\n".join(f"[{fmt_ts(l.start)}] {l.speaker}: {l.text}" for l in lines)
         try:
-            out = run_claude(self.s, NOTES_PROMPT.format(folder_rule=rule, prev=prev[-4000:], user=user,
+            from .vocab import prompt_text
+            out = run_claude(self.s, NOTES_PROMPT.format(folder_rule=rule, vocab=prompt_text(self.s) or "-", prev=prev[-4000:], user=user,
                                                          span=span, new=new), timeout=120)
         except Exception as e:  # noqa: BLE001
             print(f"appunti live: Claude non disponibile ({e})", flush=True)

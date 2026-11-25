@@ -23,6 +23,7 @@ from .audio import SR
 from .compat import NO_WINDOW, try_lock
 from .config import Settings
 from .pipeline import Line, _dedupe_echo
+from .vocab import prompt_text as vocab_prompt
 
 FRAME = 480          # 30 ms
 FS = FRAME / SR
@@ -185,7 +186,7 @@ class LiveTranscript:
     def load(self, log=lambda _: None):
         if self.asr is None:
             from .engines import ASR
-            self.asr = ASR(*self.s.asr, language=self.s.language, vocabulary=self.s.vocabulary, quiet=True)
+            self.asr = ASR(*self.s.asr, language=self.s.language, vocabulary=vocab_prompt(self.s, 40), quiet=True)
 
     # ---------- trascrizione ----------
     def _commit(self, x: np.ndarray, start: float, pause: bool = False) -> list[Line]:
@@ -387,7 +388,7 @@ class Cleaner:
         new = "\n".join(f"{i}|{lines[i].speaker}: {lines[i].text}" for i in todo)
         fixed = {i: lines[i].text for i in todo}
         try:
-            out = run_claude(self.lt.s, CLEAN_PROMPT.format(vocab=self.lt.s.vocabulary or "-", ctx=ctx, new=new),
+            out = run_claude(self.lt.s, CLEAN_PROMPT.format(vocab=vocab_prompt(self.lt.s) or "-", ctx=ctx, new=new),
                              timeout=90)
             for row in out.splitlines():
                 m = re.match(r"^\s*(\d+)\s*\|\s*(.*)$", row)

@@ -90,8 +90,16 @@ def run_claude(s: Settings, prompt: str, timeout: int = 900, allow_tools: list[s
     return res.stdout.strip()
 
 
+def _extra(s: Settings) -> str:
+    from .vocab import prompt_text
+    out = (s.claude_extra_prompt + "\n") if s.claude_extra_prompt else ""
+    if (v := prompt_text(s)):
+        out += f"Vocabolario dell'utente (grafia corretta di nomi e termini ricorrenti): {v}\n"
+    return out
+
+
 def ask(s: Settings, transcript: str, question: str, scope: str) -> str:
-    extra = (s.claude_extra_prompt + "\n") if s.claude_extra_prompt else ""
+    extra = _extra(s)
     return run_claude(s, ASK_PROMPT.format(scope=scope, question=question, extra=extra) + transcript, timeout=300)
 
 
@@ -124,7 +132,7 @@ def summarize(s: Settings, transcript: str, user_notes: str, started: datetime, 
         date=started.strftime("%d/%m/%Y %H:%M"), duration=round(duration / 60),
         apps=", ".join(apps) or "-", notes=user_notes or "(nessuno)",
         folders=", ".join(f'"{f}"' for f in folders) or "(nessuna, è la prima)",
-        extra=(s.claude_extra_prompt + "\n") if s.claude_extra_prompt else "")
+        extra=_extra(s))
     out = run_claude(s, prompt + transcript)
     title = folder = ""
     lines = out.split("\n")

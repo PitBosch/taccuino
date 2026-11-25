@@ -61,6 +61,7 @@ class Daemon:
         self.mic_since: float | None = None
         self.free_since: float | None = None
         self.running = True
+        self.vocab_check, self.vocab_proc = 0.0, None
         threading.Thread(target=self._worker, daemon=True).start()
 
     # ---------- registrazione ----------
@@ -162,6 +163,24 @@ class Daemon:
             self.s = load_settings()
             log("impostazioni ricaricate")
 
+    def _maybe_refresh_vocab(self):
+        """A riposo (niente call né elaborazioni) rigenera il vocabolario dal vault ogni vocab_refresh_days."""
+        if self.vocab_proc and self.vocab_proc.poll() is None:
+            return
+        if self.meeting or self.processing or time.time() - self.vocab_check < 3600:
+            return
+        self.vocab_check = time.time()
+        from .vocab import stale
+        try:
+            if not stale(self.s):
+                return
+        except Exception:  # noqa: BLE001
+            return
+        log("rigenero il vocabolario dal vault Obsidian …")
+        out = sys.stdout if IS_WIN and hasattr(sys.stdout, "fileno") else None
+        self.vocab_proc = subprocess.Popen([sys.executable, "-X", "utf8", "-m", "taccuino.cli", "vocabolario"],
+                                           stdin=subprocess.DEVNULL, stdout=out, stderr=out, **NO_WINDOW)
+
     def loop(self):
         MEETINGS_DIR.mkdir(parents=True, exist_ok=True)
         signal.signal(signal.SIGTERM, lambda *_: setattr(self, "running", False))
@@ -195,6 +214,7 @@ class Daemon:
                     log(f"cattura audio terminata inaspettatamente {getattr(self.meeting.rec, 'error', '')}".strip())
                     self.stop("(errore cattura)")
                 self.write_state([f"{u.app} ({u.binary})" for u in users])
+                self._maybe_refresh_vocab()
                 time.sleep(2)
         finally:
             # le elaborazioni non finite riprendono al prossimo avvio

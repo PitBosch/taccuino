@@ -91,7 +91,8 @@ def transcribe_recording(audio_path: Path, s: Settings, log=print) -> tuple[list
     if not plans:
         return [], duration
 
-    asr = ASR(*s.asr, language=s.language, vocabulary=s.vocabulary)
+    from .vocab import prompt_text
+    asr = ASR(*s.asr, language=s.language, vocabulary=prompt_text(s, 40))
     lines: dict[str, list[Line]] = {}
     t = time.time()
     for name, plan in plans.items():
