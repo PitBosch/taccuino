@@ -11,7 +11,8 @@
   taccuino status                 stato del daemon e app che usano il microfono
   taccuino start ["titolo"]       avvia una registrazione manuale (es. riunione dal vivo)
   taccuino stop                   ferma la registrazione in corso
-  taccuino note "testo"           aggiunge un appunto con timestamp alla riunione in corso
+  taccuino note "testo"           appunto per il segretario (Haiku): nota + eventuale task Jira
+  taccuino jira [ok N|no N]       proposte Jira del segretario
   taccuino process FILE|DIR       elabora un file audio/video o una cartella riunione
   taccuino summarize DIR          rigenera solo le note di Claude
   taccuino list                   ultime riunioni elaborate
@@ -99,6 +100,7 @@ def main(argv=None):
     sub.add_parser("chiedi").add_argument("question", nargs="+")
     sub.add_parser("sottotitoli")
     sub.add_parser("live-worker").add_argument("dir")
+    sub.add_parser("jira").add_argument("args", nargs="*")
     sub.add_parser("start").add_argument("title", nargs="?", default="")
     sub.add_parser("note").add_argument("text", nargs="+")
     p = sub.add_parser("process"); p.add_argument("path"); p.add_argument("--title", default="")
@@ -122,6 +124,10 @@ def main(argv=None):
         except ImportError:  # niente terminale (o prompt_toolkit mancante): console semplice
             from .console import run
         run()
+
+    elif a.cmd == "jira":
+        from .console import Console
+        Console().handle("jira " + " ".join(a.args))
 
     elif a.cmd == "live-worker":
         from .live_worker import run
@@ -191,13 +197,13 @@ def main(argv=None):
         _send("stop"); print("■ registrazione fermata, elaborazione in coda")
 
     elif a.cmd == "note":
-        st = _state()
-        if not st or not st["recording"]:
-            sys.exit("Nessuna riunione in corso.")
-        el = int(time.time() - st["since"])
-        with open(Path(st["meeting_dir"]) / "notes.txt", "a") as f:
-            f.write(f"- [{el // 60:02d}:{el % 60:02d}] {' '.join(a.text)}\n")
-        print("appunto salvato")
+        from .console import Console
+        Console().handle("n " + " ".join(a.text))
+        time.sleep(0.2)
+        import threading
+        for t in threading.enumerate():  # aspetta il segretario prima di uscire
+            if t is not threading.main_thread():
+                t.join(timeout=120)
 
     elif a.cmd == "list":
         rows = []

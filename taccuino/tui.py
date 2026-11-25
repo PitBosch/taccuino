@@ -32,7 +32,8 @@ from .console import BOLD, DIM, Console
 COMMANDS = [
     ("/riassumi", "[min]", "riassumi gli ultimi N minuti (default 5)"),
     ("/trascrizione", "[min]", "trascrizione degli ultimi N minuti"),
-    ("/nota", "<testo>", "appunto con timestamp nella riunione in corso"),
+    ("/nota", "<testo>", "appunto per il segretario (Haiku): nota + task Jira"),
+    ("/jira", "[ok N|no N]", "proposte Jira del segretario: crea o scarta"),
     ("/start", "[titolo]", "avvia una registrazione manuale"),
     ("/stop", "", "ferma la registrazione"),
     ("/live", "", "mostra/nasconde la trascrizione live"),
@@ -44,7 +45,9 @@ COMMANDS = [
 HELP = """Comandi (anche senza slash: r, t, n, s, h, q)
   /riassumi [min]     riassume gli ultimi N minuti (default 5)        r 10
   /trascrizione [min] trascrizione degli ultimi N minuti              t 2
-  /nota <testo>       appunto con timestamp                           n budget da rivedere
+  /nota <testo>       appunto per il segretario                       n budget da rivedere
+                      "n crea task: …" crea subito un task sul tuo Jira; altrimenti lo propone
+  /jira [ok N|no N]   proposte Jira: elenco · crea · scarta           jira ok 1
   /start [titolo]     registrazione manuale · /stop la ferma
   /live               mostra/nasconde la trascrizione live
   /stato · /help · /esci

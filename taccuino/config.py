@@ -82,10 +82,16 @@ class Settings:
 
     # --- durante la call ---
     live_transcribe: bool = True     # trascrizione in streaming durante la call (processo separato)
-    live_notes_minutes: float = 3.0  # ogni quanti minuti Claude aggiunge appunti alla nota (0 = mai)
+    live_notes_minutes: float = 15.0  # ogni quanti minuti Claude aggiunge appunti alla nota (0 = mai)
     # a fine call: False = nota dalla trascrizione live (veloce, niente GPU); True = ritrascrive tutto con
     # diarization (speaker separati, più preciso, qualche minuto di GPU)
     final_transcribe: bool = False
+
+    # --- Jira (tramite il connettore Atlassian di Claude Code) ---
+    jira_project: str = ""          # chiave del progetto (vuoto = il tuo progetto personale)
+    jira_issue_type: str = "Task"
+    jira_mcp: str = ""              # nome del connettore in `claude mcp list` (vuoto = trovato da solo)
+    jira_url: str = ""              # sito Atlassian, solo se ne hai più di uno
 
     keep_audio_days: int = 14  # 0 = cancella l'audio dopo l'elaborazione
 

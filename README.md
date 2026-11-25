@@ -47,7 +47,7 @@ Se `taccuino devices` non vede la GPU: `sudo usermod -aG render $USER` e poi rie
 Il daemon lancia per tutta la durata della call un **live worker** (processo separato, con Whisper caricato
 solo in quel momento):
 - trascrive in streaming il FLAC che si sta scrivendo e nelle pause fa correggere le frasi a Haiku;
-- ogni `live_notes_minutes` (default 3) Haiku legge cosa si è detto e aggiunge **appunti mirati**
+- ogni `live_notes_minutes` (default 15) Haiku legge cosa si è detto e aggiunge **appunti mirati**
   (decisioni, azioni, numeri, date, problemi) alla nota della riunione, già nella **sottocartella** di
   `~/Documents/Taccuino` che sceglie lui alla prima passata;
 - a fine call Haiku scrive la nota finale **dalla trascrizione live** (pochi secondi, niente GPU), nella
@@ -101,6 +101,20 @@ Prova:
 Limiti noti: non testato su Windows reale; se l'uscita audio predefinita cambia durante la call (es. cuffie
 Bluetooth collegate dopo), l'audio di sistema resta sul dispositivo vecchio fino alla registrazione successiva.
 La console semplice su Windows non ha la cronologia dei comandi (la TUI sì).
+
+## Il segretario (appunti e Jira)
+
+`n testo` (o `taccuino note "testo"`) non salva solo l'appunto: Haiku lo interpreta con il contesto della call
+("paolino maglietta admin tenere" → "Nel montaggio tenere solo il pezzo in cui Paolino indossa la maglietta
+"admin"") e lo mette nella nota, nella sezione "I miei appunti".
+
+Se l'appunto è un'azione, il segretario prepara un task Jira:
+- **chiesto esplicitamente** ("n crea task: rimontare il video entro lunedì") → lo crea subito;
+- **altrimenti** → lo propone: `jira` mostra le proposte, `jira ok 2` / `jira ok tutte` le crea, `jira no 1` scarta.
+
+Jira passa dal **connettore Atlassian già collegato a Claude Code** (nessun token in Taccuino): collegalo da
+claude.ai → Impostazioni → Connettori → Atlassian e verifica con `claude mcp list`. Opzioni:
+`taccuino config jira_project CHIAVE` (vuoto = il tuo progetto personale), `jira_issue_type` (default Task).
 
 ## Console
 
@@ -164,7 +178,7 @@ Impostazioni (`taccuino config` le mostra tutte, `taccuino config KEY VALUE` le 
 | `num_speakers` | -1 | -1 = automatico; impostalo se sai quante persone ci sono |
 | `cluster_threshold` | 0.6 | più alto = meno speaker |
 | `final_transcribe` | false | true = a fine call ritrascrive tutto con diarization (più lento) |
-| `live_notes_minutes` | 3 | ogni quanti minuti Claude aggiunge appunti durante la call (0 = mai) |
+| `live_notes_minutes` | 15 | ogni quanti minuti Claude aggiunge appunti durante la call (0 = mai) |
 | `keep_audio_days` | 14 | 0 = cancella l'audio subito dopo l'elaborazione |
 
 ## Prestazioni misurate (i5-1145G7, Iris Xe 80 EU, 16 GB)

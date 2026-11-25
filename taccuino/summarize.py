@@ -76,9 +76,12 @@ RECAP = ("Riassumi in 3-6 punti cosa si è detto; poi, solo se ci sono, decision
          "(chi/cosa). Se il transcript è quasi vuoto o incomprensibile, dillo in una riga.")
 
 
-def run_claude(s: Settings, prompt: str, timeout: int = 900) -> str:
+def run_claude(s: Settings, prompt: str, timeout: int = 900, allow_tools: list[str] | None = None) -> str:
+    """`claude -p` con Haiku. allow_tools: strumenti (es. di un connettore MCP) pre-approvati per questa chiamata."""
     cmd = command(s.claude_bin, "-p", "--output-format", "text", "--no-session-persistence",
                   "--disallowedTools", "Bash", "Edit", "Write", "WebFetch", "WebSearch", "NotebookEdit")
+    if allow_tools:
+        cmd += ["--allowedTools", *allow_tools]
     cmd += ["--model", CLAUDE_MODEL]
     res = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8",
                          timeout=timeout, cwd=tempfile.gettempdir(), **NO_WINDOW)

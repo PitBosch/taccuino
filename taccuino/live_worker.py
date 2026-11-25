@@ -91,7 +91,8 @@ class LiveNotes:
         rule = FOLDER_KEEP.format(folder=folder) if folder else FOLDER_FIRST.format(
             folders=", ".join(f'"{f}"' for f in existing_folders(root)) or "(nessuna)")
         prev = self.path.read_text().strip() if self.path.exists() else "(nessuno)"
-        user = (self.mdir / "notes.txt").read_text().strip() if (self.mdir / "notes.txt").exists() else "(nessuno)"
+        from .pipeline import user_notes_of
+        user = user_notes_of(self.mdir) or "(nessuno)"
         span = f"{fmt_ts(lines[0].start)}–{fmt_ts(lines[-1].end)}"
         new = "\n".join(f"[{fmt_ts(l.start)}] {l.speaker}: {l.text}" for l in lines)
         try:
@@ -114,7 +115,8 @@ class LiveNotes:
             with open(self.path, "a") as f:
                 f.write(f"\n**{span}**\n" + "\n".join(bullets) + "\n")
         self._update_meta(folder=folder, live_title=title)
-        self._write_note(title, folder)
+        if self.path.exists():  # la nota provvisoria nasce solo quando c'è almeno un appunto
+            self._write_note(title, folder)
         print(f"appunti live: +{len(bullets)} ({span}) → {folder or '.'}", flush=True)
 
     def _write_note(self, title: str, folder: str):
@@ -122,14 +124,16 @@ class LiveNotes:
         from .pipeline import _slug
         meta = self._meta()
         started = datetime.fromtimestamp(meta.get("started", time.time()))
-        old = meta.get("output")
-        out = Path(old) if old else Path(self.s.output_dir) / folder / \
-            f"{started:%Y-%m-%d %H.%M} - {_slug(title or 'Riunione')}.md"
+        old = Path(meta["output"]) if meta.get("output") else None
+        want = Path(self.s.output_dir) / folder
+        out = old if old and old.parent == want else want / f"{started:%Y-%m-%d %H.%M} - {_slug(title or 'Riunione')}.md"
         out.parent.mkdir(parents=True, exist_ok=True)
         notes = self.path.read_text().strip() if self.path.exists() else "_(ancora nessun appunto)_"
         out.write_text(f"# {title or 'Riunione'}\n\n*{started:%d/%m/%Y %H:%M} · in corso…*\n\n"
                        f"## Appunti di Claude durante la riunione\n{notes}\n")
-        if not old:
+        if old != out:
+            if old and old.exists():
+                old.unlink()  # la cartella è cambiata: sposta la nota provvisoria
             self._update_meta(output=str(out))
 
 

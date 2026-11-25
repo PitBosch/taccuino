@@ -2,7 +2,9 @@
 
   r [min]        riassumi gli ultimi N minuti (default 5)
   t [min]        mostra la trascrizione degli ultimi N minuti (default 5)
-  n testo        aggiungi un appunto alla riunione in corso
+  n testo        appunto: Haiku (il segretario) lo interpreta, lo mette nella nota e prepara task Jira
+                 ("n crea task: …" lo crea subito sul tuo Jira; altrimenti lo propone)
+  jira           proposte Jira · jira ok N | jira ok tutte · jira no N
   start [titolo] avvia una registrazione manuale · stop  la ferma
   live           mostra/nasconde le righe trascritte mentre arrivano
   s              stato · h  aiuto · q  esci
@@ -23,7 +25,7 @@ from pathlib import Path
 
 from .config import DATA_DIR, MEETINGS_DIR, load_settings
 from .live import LiveTranscript
-from .pipeline import Line, fmt_ts
+from .pipeline import Line, fmt_ts, user_notes_of
 
 TTY = sys.stdout.isatty()
 
@@ -43,7 +45,7 @@ def _fmt(l: Line) -> str:
 
 # comandi accettati anche con lo slash (/riassumi, /nota …)
 SLASH_ALIASES = {"riassumi", "r", "riassunto", "trascrizione", "t", "transcript", "nota", "n", "start", "stop",
-                 "live", "stato", "s", "status", "help", "aiuto", "h", "esci", "q", "exit", "quit"}
+                 "live", "stato", "s", "status", "help", "aiuto", "h", "esci", "q", "exit", "quit", "jira"}
 
 
 class Console:
@@ -231,7 +233,7 @@ class Console:
         if not lines:
             self.info("niente da riassumere: nessun parlato trascritto.")
             return
-        notes = (mdir / "notes.txt").read_text().strip() if (mdir / "notes.txt").exists() else ""
+        notes = user_notes_of(mdir)
         text = "\n".join(f"[{fmt_ts(l.start)}] {l.speaker}: {l.text}" for l in lines)
         if notes:
             text = f"APPUNTI DELL'UTENTE:\n{notes}\n\n{text}"
@@ -277,16 +279,31 @@ class Console:
             rows = [_fmt(l) for l in self.window(lines, mins)]
             self.out("\n".join(rows)) if rows else self.info("(nessun parlato)")
         elif v in ("n", "nota"):
-            st = self._state()
-            if not st or not st["recording"]:
-                self.error("nessuna riunione in corso")
-            elif arg.strip():
-                el = int(time.time() - st["since"])
-                with open(Path(st["meeting_dir"]) / "notes.txt", "a") as f:
-                    f.write(f"- [{el // 60:02d}:{el % 60:02d}] {arg.strip()}\n")
-                self.info("appunto salvato")
-            else:
+            if not arg.strip():
                 self.error("scrivi il testo dell'appunto: n <testo>")
+                return True
+            st = self._state()
+            mdir, el = None, None
+            if st and st["recording"]:
+                mdir, el = Path(st["meeting_dir"]), time.time() - st["since"]
+                with open(mdir / "notes.txt", "a") as f:
+                    f.write(f"- [{fmt_ts(el)}] {arg.strip()}\n")
+            self.info("appunto salvato, lo passo al segretario …" if mdir else
+                      "nessuna riunione in corso: lo uso solo per Jira …")
+            text = arg.strip()
+
+            def secretary(text=text, mdir=mdir, el=el):
+                from .secretary import handle_note
+                t = time.time()
+                self.answer("\n".join(handle_note(self.s, text, mdir, el)), time.time() - t)
+            threading.Thread(target=secretary, daemon=True).start()
+        elif v == "jira":
+            from .secretary import jira_command
+            mdir, _ = self.meeting()
+            t = time.time()
+            with self.thinking("Jira"):
+                msgs = jira_command(self.s, mdir, arg)
+            self.answer("\n".join(msgs), time.time() - t)
         elif v == "start":
             _send(f"start {arg}".strip()); self.info("● registrazione avviata")
         elif v == "stop":

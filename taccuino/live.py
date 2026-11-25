@@ -32,13 +32,33 @@ MAX_SEG = 25.0       # Whisper lavora su finestre da 30 s
 COMMIT_PAUSE = 0.7   # pausa che chiude una frase
 FORCE_COMMIT = 12.0  # oltre questa durata la frase viene fissata comunque (bozza sempre veloce)
 LABELS = ("Io", "Call")
-# Whisper su rumore/respiri "sente" queste frasi: scartale se il parlato rilevato è poco
-_HALLU_SHORT = re.compile(r"^\W*(grazie( mille| a tutti| per l'attenzione| per la visione)?|ok|okay|ciao|"
-                          r"sottotitoli.*|amara\.org.*)\W*$", re.I)
+# Filtro deterministico delle allucinazioni di Whisper ("Grazie.", "Sì.", "Grazie a tutti." su rumore e respiri).
+# Non si butta una parola in quanto tale: si guarda se il testo è plausibile per il suono che c'era.
+_HALLU_SHORT = re.compile(r"^\W*(grazie( mille| a tutti| per l'attenzione| per la visione)?|ok|okay|ciao|sì|si|no|"
+                          r"sottotitoli.*|amara\.org.*|buonasera|buongiorno)\W*$", re.I)
+MIN_RATE = 0.4  # parole al secondo di "parlato" rilevato: sotto, è rumore che Whisper ha riempito
 
 
-def _plausible(text: str, speech_secs: float) -> str:
-    return "" if speech_secs < 2.0 and _HALLU_SHORT.match(text or "") else text
+def _norm(t: str) -> str:
+    return re.sub(r"\W+", " ", t.lower()).strip()
+
+
+def _plausible(text: str, speech_secs: float, recent: list[str] = ()) -> str:
+    """Restituisce il testo se è plausibile, altrimenti "".
+    1. densità: 1-2 parole da 3-12 s di suono sono un riempitivo, non parlato (un "grazie" vero dura ~0,5 s);
+    2. frasi tipiche delle allucinazioni ammesse solo se brevi come quando le dici davvero (≤ 2,5 s);
+    3. ripetizione: la stessa frase breve appena fissata (Whisper le ripete in serie)."""
+    t = (text or "").strip()
+    words = len(re.findall(r"\w+", t))
+    if not words:
+        return ""
+    if speech_secs >= 2.0 and words / speech_secs < MIN_RATE:
+        return ""
+    if _HALLU_SHORT.match(t) and speech_secs > 2.5:
+        return ""
+    if words <= 3 and any(_norm(t) == _norm(r) for r in recent):
+        return ""
+    return text
 
 
 def _decode(path: Path, start: float) -> np.ndarray:
@@ -186,7 +206,7 @@ class LiveTranscript:
             rows = []
             for c in range(2):
                 idx = np.flatnonzero(masks[c])
-                if (text := _plausible(self.asr.transcribe(x[:, c]), secs[c])):
+                if (text := _plausible(self.asr.transcribe(x[:, c]), secs[c], self._recent(start))):
                     rows.append(Line(round(start + idx[0] * FS, 1), round(start + (idx[-1] + 1) * FS, 1),
                                      LABELS[c], text))
             mic = [r for r in rows if r.speaker == "Io"]
@@ -200,9 +220,13 @@ class LiveTranscript:
             text = self._draft  # la bozza era già su questo audio: niente seconda chiamata
         else:
             text = self.asr.transcribe(x[:, 0] * 0.5 + x[:, 1] * 0.5)
-        text = _plausible(text, max(secs))
+        text = _plausible(text, max(secs), self._recent(start))
         return [Line(round(start + idx[0] * FS, 1), round(start + (idx[-1] + 1) * FS, 1), LABELS[c], text)] \
             if text else []
+
+    def _recent(self, now: float, window: float = 45.0) -> list[str]:
+        """Testi delle ultime righe fissate (per riconoscere le ripetizioni di Whisper)."""
+        return [l.text for l in self.lines()[-4:] if now - l.end < window]
 
     def _write(self, new: list[Line], cursor: float) -> list[Line]:
         with open(self.path, "a") as f:

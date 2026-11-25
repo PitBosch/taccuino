@@ -134,6 +134,14 @@ def _slug(t: str) -> str:
     return re.sub(r"[^\w\- àèéìòù]+", "", t).strip()[:60]
 
 
+def user_notes_of(mdir: Path) -> str:
+    """Appunti dell'utente: la versione interpretata dal segretario se c'è, altrimenti quelli grezzi."""
+    for name in ("secretary.md", "notes.txt"):
+        if (mdir / name).exists() and (t := (mdir / name).read_text().strip()):
+            return t
+    return ""
+
+
 def _duration(path: Path) -> float:
     import subprocess
     from .compat import NO_WINDOW
@@ -160,7 +168,7 @@ def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
         lines, duration = transcribe_recording(audio, s, log)
     (mdir / "transcript.json").write_text(json.dumps([asdict(l) for l in lines], ensure_ascii=False, indent=1))
     started = datetime.fromtimestamp(meta.get("started", audio.stat().st_mtime))
-    user_notes = (mdir / "notes.txt").read_text().strip() if (mdir / "notes.txt").exists() else ""
+    user_notes = user_notes_of(mdir)
     transcript = transcript_text(lines)
 
     title, notes, folder = meta.get("title") or "", "", meta.get("folder", "")
@@ -191,11 +199,14 @@ def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
     outdir.mkdir(parents=True, exist_ok=True)
     old = meta.get("output")
     name = f"{started:%Y-%m-%d %H.%M} - {_slug(title)}.md"
-    # se il live worker ha già creato la nota provvisoria, resta nella sua cartella ma prende il titolo finale
-    out = (Path(old).parent / name) if old and Path(old).exists() else outdir / name
+    oldp = Path(old) if old and Path(old).exists() else None
+    provisional = bool(oldp) and "in corso…" in oldp.read_text()[:300]
+    # nota provvisoria del live worker → sostituita da quella finale nella cartella scelta;
+    # nota finale già esistente (rielaborazione) → stesso file, anche se l'hai spostato tu
+    out = oldp if oldp and not provisional else outdir / name
     out.write_text("\n".join(md))
-    if old and Path(old).exists() and Path(old) != out and "in corso…" in Path(old).read_text()[:300]:
-        Path(old).unlink()
+    if provisional and oldp != out:
+        oldp.unlink()
     meta.update(title=title, folder=folder, output=str(out), processed=time.time(), duration=duration)
     (mdir / "meta.json").write_text(json.dumps(meta, indent=1))
     if s.keep_audio_days == 0:
@@ -209,7 +220,7 @@ def resummarize(mdir: Path, s: Settings, log=print) -> Path:
     meta = json.loads((mdir / "meta.json").read_text())
     lines = [Line(**d) for d in json.loads((mdir / "transcript.json").read_text())]
     transcript = transcript_text(lines)
-    user_notes = (mdir / "notes.txt").read_text().strip() if (mdir / "notes.txt").exists() else ""
+    user_notes = user_notes_of(mdir)
     started = datetime.fromtimestamp(meta["started"])
     _, _, notes = summarize(s, transcript, user_notes, started, meta.get("duration", 0), meta.get("apps", []))
     out = Path(meta["output"])
