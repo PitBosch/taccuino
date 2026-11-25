@@ -56,6 +56,50 @@ solo in quel momento):
 Console e sottotitoli leggono i file del worker: si aprono all'istante e non caricano modelli.
 `taccuino config live_transcribe false` spegne tutto questo (la console torna a trascrivere da sola).
 
+## Windows (sperimentale)
+
+Stesso funzionamento, con queste differenze:
+
+- **Audio**: microfono + audio di sistema via WASAPI (loopback dell'uscita predefinita), con la libreria
+  `soundcard`. Il FLAC è lo stesso di Linux: L = microfono, R = sistema.
+- **Rilevamento riunioni**: dal registro "privacy microfono" di Windows (le stesse app che vedi in
+  Impostazioni → Privacy → Microfono quando lo stanno usando: Teams, Chrome, Zoom…).
+- **Servizio**: un'attività dell'Utilità di pianificazione che avvia il daemon all'accesso, senza finestre.
+- **Dati**: `%LOCALAPPDATA%\taccuino` (modelli, riunioni, `daemon.log`). Note in `Documenti\Taccuino`
+  (anche se Documenti è su OneDrive).
+
+Installazione (PowerShell):
+
+```powershell
+winget install Python.Python.3.12        # o da python.org, con "tcl/tk" selezionato (serve per i sottotitoli)
+winget install Gyan.FFmpeg               # ffmpeg nel PATH (riapri il terminale dopo)
+setx PYTHONUTF8 1                        # una volta sola: file e note in UTF-8 (accenti!)
+# riapri il terminale, poi:
+git clone -b live-console https://github.com/PitBosch/taccuino; cd taccuino
+py -3.12 -m venv .venv
+.venv\Scripts\pip install -e .
+.venv\Scripts\taccuino devices           # deve comparire GPU (e NPU sui Core Ultra) + microfoni/uscite
+.venv\Scripts\taccuino download          # Whisper (~830 MB) + diarization
+.venv\Scripts\taccuino install-service   # attività "Taccuino" all'accesso, parte subito
+.venv\Scripts\taccuino status
+```
+
+Requisiti: driver grafici Intel aggiornati (per GPU) e driver NPU Intel (Core Ultra), Claude Code installato
+e autenticato (`claude` nel PATH: prova `claude -p "ciao"`). Con il profilo `npu`
+(`taccuino config profile npu`) Whisper gira sulla NPU e la GPU resta libera durante le call.
+
+Prova:
+
+1. `taccuino start "prova"`, parla 1-2 minuti, `taccuino stop` → dopo qualche minuto la nota in `Documenti\Taccuino`.
+2. Apri una call Teams: entro ~5 s `taccuino status` deve dire "registrazione in corso (MSTeams)".
+3. Durante la call: `taccuino` (console) o `taccuino sottotitoli` (finestrina).
+4. Log del daemon: `%LOCALAPPDATA%\taccuino\daemon.log`. Per fermarlo: `taccuino quit`;
+   per toglierlo: `taccuino uninstall-service`.
+
+Limiti noti: non testato su Windows reale; se l'uscita audio predefinita cambia durante la call (es. cuffie
+Bluetooth collegate dopo), l'audio di sistema resta sul dispositivo vecchio fino alla registrazione successiva.
+La console semplice su Windows non ha la cronologia dei comandi (la TUI sì).
+
 ## Console
 
 Scrivi `taccuino` e si apre un'interfaccia in stile Claude Code sulla riunione in corso (o sull'ultima):

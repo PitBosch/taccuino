@@ -157,7 +157,10 @@ def run(mdir: str):
     lt.beat()
     lt.load()
     print(f"live: trascrizione in streaming di {Path(mdir).name}", flush=True)
+    stop_file = lt.mdir / "live.stop"  # il daemon lo crea a fine call (funziona anche su Windows)
     while not stop.is_set():
+        if stop_file.exists():
+            break
         lt.beat()
         try:
             _, _, trailing = lt.step()
@@ -183,3 +186,4 @@ def run(mdir: str):
     except Exception as e:  # noqa: BLE001
         print(f"live: chiusura: {e}", flush=True)
     (lt.mdir / "live.driver").unlink(missing_ok=True)
+    stop_file.unlink(missing_ok=True)

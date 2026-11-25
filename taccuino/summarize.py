@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import re
 import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
+from .compat import NO_WINDOW, command
 from .config import Settings
 
 # Taccuino usa sempre e solo Claude Haiku: veloce, economico, basta per note e riassunti. Non configurabile.
@@ -75,10 +77,11 @@ RECAP = ("Riassumi in 3-6 punti cosa si è detto; poi, solo se ci sono, decision
 
 
 def run_claude(s: Settings, prompt: str, timeout: int = 900) -> str:
-    cmd = [s.claude_bin, "-p", "--output-format", "text", "--no-session-persistence",
-           "--disallowedTools", "Bash", "Edit", "Write", "WebFetch", "WebSearch", "NotebookEdit"]
+    cmd = command(s.claude_bin, "-p", "--output-format", "text", "--no-session-persistence",
+                  "--disallowedTools", "Bash", "Edit", "Write", "WebFetch", "WebSearch", "NotebookEdit")
     cmd += ["--model", CLAUDE_MODEL]
-    res = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=timeout, cwd="/tmp")
+    res = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8",
+                         timeout=timeout, cwd=tempfile.gettempdir(), **NO_WINDOW)
     if res.returncode != 0 or not res.stdout.strip():
         raise RuntimeError((res.stderr or res.stdout or f"exit {res.returncode}").strip()[-400:])
     return res.stdout.strip()

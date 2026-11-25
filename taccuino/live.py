@@ -10,7 +10,6 @@ con gli speaker separati arriva comunque a fine riunione.
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import re
@@ -21,6 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from .audio import SR
+from .compat import NO_WINDOW, try_lock
 from .config import Settings
 from .pipeline import Line, _dedupe_echo
 
@@ -45,7 +45,7 @@ def _decode(path: Path, start: float) -> np.ndarray:
     """Decodifica da `start` secondi in poi, forma (n, 2). Tollera un file ancora in scrittura."""
     raw = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "quiet", "-nostdin", "-ss", f"{start:.3f}",
                           "-i", str(path), "-ac", "2", "-ar", str(SR), "-f", "s16le", "pipe:1"],
-                         capture_output=True).stdout
+                         capture_output=True, **NO_WINDOW).stdout
     x = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
     return x[: len(x) // 2 * 2].reshape(-1, 2)
 
@@ -214,9 +214,7 @@ class LiveTranscript:
 
     def _locked(self):
         f = open(self.mdir / "live.lock", "w")
-        try:
-            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+        if not try_lock(f):
             f.close()
             return None
         return f

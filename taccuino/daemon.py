@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import queue
+import shutil
 import signal
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .audio import Recorder
+from .compat import IS_WIN, NO_WINDOW
 from .config import CONTROL_PATH, MEETINGS_DIR, STATE_PATH, load_settings
 from .detect import mic_users
 from .pipeline import cleanup_audio
@@ -69,8 +71,9 @@ class Daemon:
         m.rec = Recorder(self.s.mic_source, self.s.system_source, m.dir / "audio.flac")
         m.rec.start()
         if self.s.live_transcribe:  # trascrizione + appunti live in un processo a parte
-            m.live = subprocess.Popen([sys.executable, "-m", "taccuino.cli", "live-worker", str(m.dir)],
-                                      stdin=subprocess.DEVNULL)
+            out = sys.stdout if IS_WIN and hasattr(sys.stdout, "fileno") else None
+            m.live = subprocess.Popen([sys.executable, "-X", "utf8", "-m", "taccuino.cli", "live-worker", str(m.dir)],
+                                      stdin=subprocess.DEVNULL, stdout=out, stderr=out, **NO_WINDOW)
         self.meeting = m
         log(f"● registrazione avviata ({'manuale' if manual else ', '.join(m.apps)}) → {m.dir.name}")
 
@@ -90,12 +93,10 @@ class Daemon:
                 m.live.kill()
                 m.live.wait()
             else:
-                m.live.terminate()  # fa l'ultimo giro di correzione/appunti, poi esce
+                (m.dir / "live.stop").touch()  # il worker fa l'ultimo giro di correzione/appunti, poi esce
         if short:
             log(f"■ registrazione di {dur:.0f}s scartata (troppo corta)")
-            for f in m.dir.iterdir():
-                f.unlink()
-            m.dir.rmdir()
+            shutil.rmtree(m.dir, ignore_errors=True)  # su Windows un file aperto (es. dalla console) non blocca il daemon
             return
         log(f"■ registrazione chiusa dopo {dur / 60:.1f} min {reason}; in coda per l'elaborazione")
 
@@ -117,8 +118,9 @@ class Daemon:
             try:
                 # processo separato: diarization e Whisper non bloccano il rilevamento delle call
                 # (le librerie native tengono il GIL e fermerebbero il ciclo principale)
-                r = subprocess.run([sys.executable, "-m", "taccuino.cli", "process", str(d)],
-                                   stdin=subprocess.DEVNULL)
+                out = sys.stdout if IS_WIN and hasattr(sys.stdout, "fileno") else None  # su Windows: nel log
+                r = subprocess.run([sys.executable, "-X", "utf8", "-m", "taccuino.cli", "process", str(d)],
+                                   stdin=subprocess.DEVNULL, stdout=out, stderr=out, **NO_WINDOW)
                 if r.returncode:
                     log(f"[{d.name}] elaborazione fallita (exit {r.returncode})")
             except Exception:  # noqa: BLE001
@@ -153,6 +155,9 @@ class Daemon:
                 self.start(True, arg)
         elif verb == "stop":
             self.stop("(manuale)")
+        elif verb == "quit":  # usato da `taccuino quit` / uninstall-service (su Windows non c'è SIGTERM)
+            log("arresto richiesto")
+            self.running = False
         elif verb == "reload":
             self.s = load_settings()
             log("impostazioni ricaricate")
@@ -160,6 +165,8 @@ class Daemon:
     def loop(self):
         MEETINGS_DIR.mkdir(parents=True, exist_ok=True)
         signal.signal(signal.SIGTERM, lambda *_: setattr(self, "running", False))
+        if IS_WIN and hasattr(signal, "SIGBREAK"):
+            signal.signal(signal.SIGBREAK, lambda *_: setattr(self, "running", False))
         log(f"taccuino in ascolto (ASR {self.s.asr[0].split('/')[-1]} @ {self.s.asr[1]}, "
             f"auto-detect {'on' if self.s.auto_detect else 'off'}, output {self.s.output_dir})")
         # riprendi elaborazioni rimaste a metà (es. dopo un riavvio)
@@ -185,7 +192,7 @@ class Daemon:
                     if self.meeting and not self.meeting.manual and now - self.free_since >= self.s.stop_delay:
                         self.stop("(microfono libero)")
                 if self.meeting and self.meeting.rec and not self.meeting.rec.alive():
-                    log("ffmpeg terminato inaspettatamente")
+                    log(f"cattura audio terminata inaspettatamente {getattr(self.meeting.rec, 'error', '')}".strip())
                     self.stop("(errore cattura)")
                 self.write_state([f"{u.app} ({u.binary})" for u in users])
                 time.sleep(2)
@@ -196,4 +203,10 @@ class Daemon:
 
 
 def run():
+    if IS_WIN and (sys.stdout is None or not sys.stdout.isatty()):
+        # con pythonw non c'è console: tutto finisce in daemon.log
+        from .config import DATA_DIR
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        f = open(DATA_DIR / "daemon.log", "a", buffering=1, encoding="utf-8")
+        sys.stdout = sys.stderr = f
     Daemon().loop()
