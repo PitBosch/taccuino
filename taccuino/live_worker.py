@@ -177,7 +177,10 @@ def run(mdir: str):
         if not cleaning.is_set() and Cleaner(lt).due(last_speech):
             bg(cleaning, Cleaner(lt).run)
         if notes.due() and not noting.is_set() and not cleaning.is_set():
-            bg(noting, notes.run)
+            def clean_then_note():  # stesso giro: prima corregge, poi prende appunti sul testo corretto
+                Cleaner(lt).run()
+                notes.run()
+            bg(noting, clean_then_note)
         stop.wait(0.2)
     # fine call: ultima correzione e ultimo giro di appunti, poi esci (la pipeline finale fa il resto)
     for ev in (cleaning, noting):

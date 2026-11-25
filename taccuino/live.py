@@ -335,8 +335,7 @@ class Cleaner:
         self.lt = lt
 
     def due(self, last_speech: float) -> bool:
-        """Correggere adesso? Ogni `live_clean_seconds` (in una pausa), o prima se il testo in attesa è tanto.
-        live_clean_seconds = 0: solo a fine call."""
+        """Correggere adesso? Ogni `live_clean_seconds` (default 15 min), in una pausa. 0 = solo a fine call."""
         every = self.lt.s.live_clean_seconds
         if every <= 0:
             return False
@@ -346,7 +345,7 @@ class Cleaner:
         now = time.time()
         last = Cleaner._last.setdefault(str(self.lt.mdir), now)
         paused = now - last_speech > 1.2
-        return (now - last >= every and paused) or len(todo) >= 40
+        return now - last >= every and paused
 
     def mark(self):
         Cleaner._last[str(self.lt.mdir)] = time.time()
@@ -356,9 +355,16 @@ class Cleaner:
         return [i for i in range(len(self.lt.lines())) if i not in done]
 
     def run(self) -> list[int]:
-        """Corregge le righe in attesa; restituisce gli indici corretti. Se Claude fallisce, tiene il grezzo."""
-        from .summarize import run_claude
+        """Corregge TUTTE le righe in attesa, a blocchi da 60; restituisce gli indici corretti."""
         self.mark()
+        done: list[int] = []
+        while (chunk := self._run_chunk()):
+            done += chunk
+        return done
+
+    def _run_chunk(self) -> list[int]:
+        """Corregge fino a 60 righe in attesa. Se Claude fallisce, tiene il grezzo."""
+        from .summarize import run_claude
         lines = self.lt.lines()
         todo = self.pending()[:60]
         if not todo:
