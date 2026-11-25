@@ -63,8 +63,16 @@ def _win_install_service():
     tr = f'"{pyw}" -X utf8 -m taccuino.cli daemon'
     r = subprocess.run(["schtasks", "/Create", "/SC", "ONLOGON", "/TN", WIN_TASK, "/TR", tr, "/RL", "LIMITED", "/F"],
                        capture_output=True, text=True)
-    if r.returncode:
-        sys.exit("schtasks: " + (r.stderr or r.stdout).strip())
+    if r.returncode:  # senza admin schtasks /SC ONLOGON è negato: Register-ScheduledTask per il solo utente corrente funziona
+        ps = (f"$a=New-ScheduledTaskAction -Execute '{pyw}' -Argument '-X utf8 -m taccuino.cli daemon';"
+              "$t=New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME;"
+              "$s=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries "
+              "-ExecutionTimeLimit ([TimeSpan]::Zero);"
+              f"Register-ScheduledTask -TaskName '{WIN_TASK}' -Action $a -Trigger $t -Settings $s "
+              "-User $env:USERNAME -RunLevel Limited -Force -ErrorAction Stop | Out-Null")
+        r2 = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True)
+        if r2.returncode:
+            sys.exit("schtasks: " + (r.stderr or r.stdout).strip() + "\n" + r2.stderr.strip())
     subprocess.run(["schtasks", "/Run", "/TN", WIN_TASK], capture_output=True)
     print(f"Attività \"{WIN_TASK}\" creata: parte a ogni accesso.\nLog: {DATA_DIR / 'daemon.log'}")
 
