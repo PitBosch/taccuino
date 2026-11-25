@@ -1,105 +1,96 @@
-"""Profili hardware e percorsi.
+"""Impostazioni e percorsi.
 
-Un profilo dice quale modello usare e su quale device OpenVINO farlo girare.
-  - "xe"  : Intel Iris Xe / Arc iGPU (questo laptop, Tiger Lake)
-  - "npu" : Intel Core Ultra con NPU (Meteor Lake / Lunar Lake / Arrow Lake)
-  - "cpu" : fallback universale
+Profili ASR (Whisper via OpenVINO):
+  - "xe"  : Intel Iris Xe / Arc iGPU (default)
+  - "npu" : Intel Core Ultra con NPU: la trascrizione non occupa la GPU
+  - "cpu" : fallback
+La diarization gira sempre su CPU (sherpa-onnx, leggera).
+I riassunti li scrive Claude Code (`claude -p`).
 """
 from __future__ import annotations
 
 import json
 import os
+import shutil
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 DATA_DIR = Path(os.environ.get("TACCUINO_HOME", Path.home() / ".local/share/taccuino"))
 MODELS_DIR = DATA_DIR / "models"
-DB_PATH = DATA_DIR / "taccuino.db"
+MEETINGS_DIR = DATA_DIR / "meetings"
 CONFIG_PATH = DATA_DIR / "config.json"
+STATE_PATH = DATA_DIR / "state.json"
+CONTROL_PATH = DATA_DIR / "control"
 
-
-@dataclass
-class Profile:
-    asr_model: str
-    asr_device: str
-    llm_model: str
-    llm_device: str
-    # Proprietà extra passate a LLMPipeline (es. limiti di prompt per la NPU)
-    llm_props: dict = field(default_factory=dict)
-    # Numero massimo di caratteri di transcript per chiamata LLM (map-reduce oltre)
-    llm_chunk_chars: int = 12000
-
-
-PROFILES: dict[str, Profile] = {
-    # Iris Xe: Whisper turbo int8 + Qwen3-4B int4, tutto su GPU.
-    "xe": Profile(
-        asr_model="OpenVINO/whisper-large-v3-turbo-int8-ov",
-        asr_device="GPU",
-        llm_model="OpenVINO/Qwen3-4B-int4-ov",
-        llm_device="GPU",
-        llm_chunk_chars=12000,
-    ),
-    # NPU (Core Ultra): Whisper su NPU (libera la GPU), LLM su NPU con modello
-    # int4 simmetrico channel-wise ("-cw-"), l'unico formato consigliato per NPU.
-    # La NPU compila il modello con lunghezza di prompt fissa: MAX_PROMPT_LEN.
-    "npu": Profile(
-        asr_model="OpenVINO/whisper-large-v3-turbo-int8-ov",
-        asr_device="NPU",
-        llm_model="OpenVINO/Qwen3-8B-int4-cw-ov",
-        llm_device="NPU",
-        llm_props={"MAX_PROMPT_LEN": 4096, "MIN_RESPONSE_LEN": 1024, "CACHE_DIR": str(DATA_DIR / "npu-cache")},
-        llm_chunk_chars=9000,
-    ),
-    # NPU per l'ASR, GPU per l'LLM: spesso il miglior compromesso su Lunar Lake.
-    "npu+gpu": Profile(
-        asr_model="OpenVINO/whisper-large-v3-turbo-int8-ov",
-        asr_device="NPU",
-        llm_model="OpenVINO/Qwen3-8B-int4-ov",
-        llm_device="GPU",
-        llm_chunk_chars=16000,
-    ),
-    "cpu": Profile(
-        asr_model="OpenVINO/whisper-small-int8-ov",
-        asr_device="CPU",
-        llm_model="OpenVINO/Qwen3-1.7B-int4-ov",
-        llm_device="CPU",
-        llm_chunk_chars=8000,
-    ),
+ASR_PROFILES = {
+    "xe": ("OpenVINO/whisper-large-v3-turbo-int8-ov", "GPU"),
+    "npu": ("OpenVINO/whisper-large-v3-turbo-int8-ov", "NPU"),
+    "cpu": ("OpenVINO/whisper-small-int8-ov", "CPU"),
 }
+
+SEGMENTATION_URL = ("https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/"
+                    "sherpa-onnx-pyannote-segmentation-3-0.tar.bz2")
+EMBEDDING_URL = ("https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
+                 "wespeaker_en_voxceleb_resnet34_LM.onnx")
+
+
+def _default_output_dir() -> str:
+    for name in ("Documenti", "Documents"):
+        if (Path.home() / name).is_dir():
+            return str(Path.home() / name / "Taccuino")
+    return str(Path.home() / "Taccuino")
 
 
 @dataclass
 class Settings:
     profile: str = "xe"
     # None = rilevamento automatico; "it" / "en" per forzare la lingua
-    language: str | None = None
-    # Sorgenti PulseAudio/PipeWire (vedi `taccuino devices`)
+    language: str | None = "it"
     mic_source: str = "default"
     system_source: str = "@DEFAULT_MONITOR@"
-    capture_system_audio: bool = True
-    host: str = "127.0.0.1"
-    port: int = 8765
-    # Override puntuali del profilo (es. {"llm_model": "OpenVINO/gemma-4-E4B-it-int4-ov"})
-    overrides: dict = field(default_factory=dict)
+    output_dir: str = field(default_factory=_default_output_dir)
 
-    def resolved_profile(self) -> Profile:
-        p = Profile(**asdict(PROFILES[self.profile]))
-        for k, v in self.overrides.items():
-            setattr(p, k, v)
-        return p
+    # --- rilevamento automatico delle riunioni ---
+    auto_detect: bool = True
+    # app che tengono il microfono aperto ma non sono riunioni (nome binario o application.name)
+    ignore_apps: list = field(default_factory=lambda: ["ffmpeg", "pw-record", "parecord", "arecord",
+                                                       "easyeffects", "obs", "speech-dispatcher"])
+    start_delay: float = 5.0    # secondi di microfono in uso prima di iniziare
+    stop_delay: float = 20.0    # secondi di microfono libero prima di chiudere
+    min_meeting_seconds: float = 60.0  # registrazioni più corte vengono scartate
+
+    # --- diarization ---
+    num_speakers: int = -1        # -1 = automatico
+    cluster_threshold: float = 0.6  # più alto = meno speaker
+
+    # --- Claude Code ---
+    summarize: bool = True
+    claude_bin: str = field(default_factory=lambda: shutil.which("claude") or str(Path.home() / ".local/bin/claude"))
+    claude_model: str | None = "haiku"  # modello Claude Code per le note
+    claude_extra_prompt: str = ""    # istruzioni aggiuntive (es. "usa sempre l'inglese")
+
+    keep_audio_days: int = 14  # 0 = cancella l'audio dopo l'elaborazione
+
+    # --- trascrizione ---
+    asr_model: str | None = None  # override del modello del profilo (repo Hugging Face OpenVINO)
+    vocabulary: str = ""  # nomi/termini ricorrenti, es. "Paolino, Floripa, Kubernetes"
+
+    @property
+    def asr(self) -> tuple[str, str]:
+        model, device = ASR_PROFILES[self.profile]
+        return self.asr_model or model, device
 
 
 def load_settings() -> Settings:
     s = Settings()
     if CONFIG_PATH.exists():
-        data = json.loads(CONFIG_PATH.read_text())
-        for k, v in data.items():
+        for k, v in json.loads(CONFIG_PATH.read_text()).items():
             if hasattr(s, k):
                 setattr(s, k, v)
     if env := os.environ.get("TACCUINO_PROFILE"):
         s.profile = env
-    if s.profile not in PROFILES:
-        raise SystemExit(f"Profilo sconosciuto {s.profile!r}. Disponibili: {', '.join(PROFILES)}")
+    if s.profile not in ASR_PROFILES:
+        raise SystemExit(f"Profilo sconosciuto {s.profile!r}. Disponibili: {', '.join(ASR_PROFILES)}")
     return s
 
 

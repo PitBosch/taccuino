@@ -1,115 +1,113 @@
 # Taccuino
 
-Note di riunione **100% locali** in stile Granola: scrivi appunti veloci durante la call, Taccuino
-registra microfono + audio di sistema, trascrive in tempo reale e alla fine fonde i tuoi appunti con il
-transcript in note strutturate (sintesi, decisioni, azioni). Italiano e inglese.
+Registratore di riunioni **sempre attivo** per Linux, ispirato a Granola, senza bot che entrano nella call.
 
-Gira su **Intel Iris Xe / Arc** (GPU integrata) e **Intel NPU** (Core Ultra) tramite
-[OpenVINO GenAI](https://github.com/openvinotoolkit/openvino.genai). Niente cloud, niente bot che entra
-nella call: cattura l'audio del PC come fa Granola.
+1. Un servizio systemd resta in ascolto. Quando un'app (Meet, Teams, Zoom, Slack…) apre il microfono,
+   registra **microfono + audio di sistema** su due canali separati. Quando l'app lo rilascia, si ferma.
+2. Alla fine della riunione, in locale:
+   - **diarization** (chi parla quando) con sherpa-onnx (pyannote-segmentation-3.0 + WeSpeaker), su CPU;
+   - **trascrizione** con Whisper large-v3-turbo via **OpenVINO** su **Intel Iris Xe / Arc** (o NPU).
+3. Le note (sintesi, decisioni, azioni, partecipanti) le scrive **Claude Code** (`claude -p --model haiku`).
+4. Il risultato è un file Markdown in `~/Documents/Taccuino/`.
 
-> Taccuino **non riproduce mai audio**: registra solo. Nessun beep, nessuna notifica sonora.
-
-## Come funziona
+> Taccuino **non emette mai suoni**: registra soltanto. Niente beep e niente notifiche sonore.
 
 ```
- mic (PipeWire) ──┐                    ┌─ canale L "Io"   ─┐
-                  ├─ ffmpeg 16 kHz ────┤                   ├─ VAD → Whisper (GPU/NPU) → transcript live
- monitor sistema ─┘                    └─ canale R "Altri"─┘
-                                                     ▼
-                tue note + transcript ──► LLM (GPU/NPU) ──► note finali (Markdown)
+ microfono ─┐                         ┌─ L: tu + chi è in stanza ─┐
+            ├─ ffmpeg → audio.flac ───┤                           ├─ diarization → turni → Whisper (GPU)
+ sistema  ──┘    (durante la call)    └─ R: partecipanti remoti  ─┘                        │
+                                                                                          ▼
+                       ~/Documents/Taccuino/2026-11-25 14.30 - Titolo.md  ◄── claude -p --model haiku
 ```
 
-- Due canali separati → il transcript distingue **Io** / **Altri** senza diarizzazione.
-- Segmentazione sui silenzi (VAD a energia adattiva), segmenti da 4–25 s.
-- Riunioni lunghe: map-reduce (riassunto per parti, poi note finali).
-- Archivio SQLite in `~/.local/share/taccuino/`, export Markdown, "Chiedi" sulla riunione.
-- Import di file audio/video esistenti.
+## Etichette degli speaker
+
+- **Io**: lo speaker con più parlato sul canale microfono.
+- **In sala N**: altre voci sul microfono (riunioni dal vivo).
+- **Speaker N**: partecipanti remoti (canale di sistema).
+- Claude prova a dedurre i nomi reali dal contesto, ad esempio "Marco (Speaker 2)".
+- Se usi gli altoparlanti, le righe duplicate dall'eco vengono scartate per similarità. Le cuffie restano meglio.
 
 ## Installazione
 
 ```bash
-git clone <questa repo> && cd taccuino
+git clone https://github.com/PitBosch/taccuino && cd taccuino
 python3 -m venv .venv && .venv/bin/pip install -e .
-# se `taccuino devices` non vede la GPU: sudo usermod -aG render $USER (poi rilogin)
-.venv/bin/taccuino devices             # deve elencare GPU (e NPU sul PC di lavoro)
-.venv/bin/taccuino download            # ~3 GB per il profilo xe
-.venv/bin/taccuino serve               # → http://127.0.0.1:8765
+.venv/bin/taccuino devices          # deve comparire GPU (e NPU sul PC di lavoro)
+.venv/bin/taccuino download         # Whisper (~830 MB) + modelli di diarization (~35 MB)
+.venv/bin/taccuino install-service  # servizio systemd utente, parte al login
+journalctl --user -u taccuino -f    # log
 ```
 
-Driver GPU su Ubuntu 24.04: `intel-opencl-icd` (già presente) basta; per Arc/Lunar Lake conviene il
-compute-runtime recente di Intel.
+Requisiti: PipeWire (con pipewire-pulse), ffmpeg, Claude Code autenticato (`claude` nel PATH).
+Se `taccuino devices` non vede la GPU: `sudo usermod -aG render $USER` e poi rientra nella sessione.
 
-Comandi utili:
+## Uso quotidiano
 
 ```bash
-taccuino transcribe riunione.mp3 --language it
-taccuino notes riunione.mp3                 # transcript + note in console
-taccuino bench riunione.mp3                 # velocità ASR/LLM sul profilo attivo
-taccuino config profile npu                 # cambia profilo
-taccuino config language it                 # forza lingua (default: automatica)
-taccuino config overrides '{"llm_model":"OpenVINO/gemma-4-E4B-it-int4-ov"}'
+taccuino status                    # in ascolto / in registrazione / in elaborazione
+taccuino start "1:1 con Marco"     # registrazione manuale (riunione dal vivo, senza app)
+taccuino note "budget da rivedere" # appunto con timestamp, Claude gli dà priorità
+taccuino stop
+taccuino list                      # ultime riunioni
+taccuino process registrazione.m4a # elabora un file audio/video esistente
+taccuino summarize ~/.local/share/taccuino/meetings/<cartella>   # rigenera solo le note
 ```
 
-## Profili hardware
+Impostazioni (`taccuino config` le mostra tutte, `taccuino config KEY VALUE` le modifica):
 
-| Profilo   | ASR                              | LLM                         | Per chi |
-|-----------|----------------------------------|-----------------------------|---------|
-| `xe`      | whisper-large-v3-turbo int8 · GPU | Qwen3-4B int4 · GPU          | Iris Xe (Tiger Lake, questo PC), Arc |
-| `npu`     | whisper-large-v3-turbo int8 · NPU | Qwen3-8B int4-cw · NPU       | Core Ultra, GPU libera |
-| `npu+gpu` | whisper-large-v3-turbo int8 · NPU | Qwen3-8B int4 · GPU          | Lunar/Arrow Lake: probabilmente il migliore |
-| `cpu`     | whisper-small int8 · CPU          | Qwen3-1.7B int4 · CPU        | fallback |
-
-## Ricerca modelli (novembre 2026)
-
-### Speech-to-text IT + EN
-
-| Modello | Note | Verdetto |
+| chiave | default | note |
 |---|---|---|
-| **Whisper large-v3-turbo** | 809M, 4 layer di decoder → ~5–8× più veloce di large-v3 con WER vicino. Ottimo italiano e code-switching IT/EN. Pre-convertito da Intel (`OpenVINO/whisper-large-v3-turbo-int8-ov`), supportato su CPU/GPU/NPU con timestamp per parola. | **Scelto** |
-| Whisper large-v3 | Un po' più preciso, molto più lento su iGPU. | Opzione qualità su Arc |
-| Parakeet TDT 0.6B v3 (NVIDIA) | Ottimo italiano (FLEURS ~3% WER dichiarato), velocissimo, ma niente conversione OpenVINO ufficiale (serve export ONNX a mano). | Candidato futuro |
-| Cohere Transcribe (03-2026), Canary-Qwen 2.5B, Granite Speech | Top dell'Open ASR Leaderboard in inglese; supporto OpenVINO/iGPU assente o non ufficiale, e più pesanti. | No per ora |
-| Qwen3-ASR | Supportato dal nuovo ASRPipeline di OpenVINO 2026.3+. | Da valutare |
+| `profile` | `xe` | `xe` (GPU), `npu`, `cpu` |
+| `asr_model` | — | sostituisce il modello del profilo (repo HF OpenVINO) |
+| `language` | `it` | `en`, oppure `auto` (sconsigliato: Whisper allucina in inglese sui silenzi) |
+| `vocabulary` | — | nomi e termini ricorrenti: migliora la trascrizione |
+| `claude_model` | `haiku` | modello usato da Claude Code |
+| `claude_extra_prompt` | — | istruzioni extra per le note |
+| `ignore_apps` | ffmpeg, obs… | app che aprono il microfono senza essere riunioni |
+| `start_delay` / `stop_delay` | 5 s / 20 s | isteresi del rilevamento |
+| `min_meeting_seconds` | 60 | sotto questa durata la registrazione viene scartata (es. vocali) |
+| `num_speakers` | -1 | -1 = automatico; impostalo se sai quante persone ci sono |
+| `cluster_threshold` | 0.6 | più alto = meno speaker |
+| `keep_audio_days` | 14 | 0 = cancella l'audio subito dopo l'elaborazione |
 
-### LLM per note/riassunti IT + EN (deve stare in ~3 GB su iGPU)
+## Prestazioni misurate (i5-1145G7, Iris Xe 80 EU, 16 GB)
 
-| Modello | Note | Verdetto |
+| passo | device | velocità |
 |---|---|---|
-| **Qwen3-4B int4** | Tra i migliori small model in italiano (MMLU-IT ~0.62 contro ~0.52 di Gemma 3 4B in una valutazione CLiC-it 2025), contesto 32k, `/no_think` per risposte dirette. | **Scelto per Xe** |
-| Qwen3.5-4B int4 | Più recente, migliore nelle classifiche generali; pre-convertito (`OpenVINO/Qwen3.5-4B-int4-ov`). | Alternativa da provare via `overrides` |
-| Gemma 4 E4B / E2B int4 | Buon italiano, il più documentato su NPU (~17–18 tok/s su Lunar Lake). | Alternativa NPU (`gemma-4-E2B-it-int4-cw-ov`) |
-| Qwen3-8B int4(-cw) | Qualità superiore, ~5 GB: lento su Iris Xe, ok su NPU/Arc. | **Scelto per NPU** |
-| Phi-4-mini | Buono in inglese, italiano meno naturale. | No |
+| Whisper large-v3-turbo int8 | GPU Iris Xe | RTF ~0,2–0,28 (2 min di audio in 24–33 s) |
+| Diarization sherpa-onnx | CPU, 4 thread | RTF ~0,075 |
+| Note con Claude Haiku | cloud | ~15 s |
 
-### NPU (PC di lavoro)
+Un'ora di riunione richiede circa 20–25 minuti di elaborazione in background a fine call.
 
-- Serve un **Core Ultra** (Meteor Lake, Lunar Lake, Arrow Lake) con driver
-  [intel/linux-npu-driver](https://github.com/intel/linux-npu-driver) (Linux) o driver NPU ≥ 32.0.100.5540
-  (Windows). Verifica con `taccuino devices`.
-- **Whisper su NPU funziona bene** ed è il vantaggio principale: la trascrizione live gira a basso consumo
-  e lascia libera la GPU. Usare OpenVINO ≥ 2026.4 (in 2026.3 c'era un bug di stato riutilizzato tra
-  inferenze, issue openvino#37937).
-- **LLM su NPU**: solo modelli int4 simmetrici channel-wise (suffisso `-cw-`); la NPU compila il grafo
-  con una lunghezza di prompt fissa (`MAX_PROMPT_LEN`, qui 4096): per questo il profilo `npu` usa chunk più
-  piccoli e map-reduce. La prima compilazione è lenta, poi viene messa in cache (`npu-cache/`).
-- Su Lunar Lake la GPU Arc 140V è spesso più veloce della NPU per l'LLM → profilo `npu+gpu`.
-- Su Windows lo stesso codice funziona sostituendo la cattura `-f pulse` di ffmpeg con `-f dshow`/WASAPI
-  (non ancora implementato).
+## Scelta dei modelli (novembre 2026)
 
-## Limiti noti
+**Trascrizione (OpenVINO, GPU Intel).** Modelli che girano con `openvino_genai` 2026.4:
 
-- Con altoparlanti il microfono riprende anche gli altri → righe duplicate "Io/Altri". Usa le cuffie.
-- Il VAD è a energia: in ambienti molto rumorosi alza `threshold` in `audio.py`.
-- La UI ascolta solo su `127.0.0.1`.
+| modello | dimensione | note |
+|---|---|---|
+| **Whisper large-v3-turbo int8** (`OpenVINO/…`) | 830 MB | default: ottimo rapporto qualità/velocità su iGPU, conversione ufficiale Intel |
+| Whisper large-v3 int8 (`OpenVINO/…`) | 1,6 GB | un po' più preciso, ~3–4× più lento |
+| Qwen3-ASR 1.7B int8 (conversioni community) | 2,4 GB | italiano FLEURS ~2,4% WER dal report tecnico; `ASRPipeline` |
+| Qwen3-ASR 0.6B int8 | 1 GB | più leggero, italiano ~5% WER |
+| distil-whisper large-v3 | — | **solo inglese**: escluso |
+| Parakeet v3, Canary, Cohere Transcribe, Fun-ASR-MLT | — | nessuna conversione OpenVINO pronta (servirebbe export manuale) |
 
-## Fonti
+Il benchmark tra i candidati si lancia con `scripts/bench_asr.py`.
 
-- [OpenVINO 2026 release notes](https://docs.openvino.ai/2026/about-openvino/release-notes-openvino.html)
-- [OpenVINO 2026.4: ASR pipeline](https://medium.com/openvino-toolkit/openvino-2026-4-broader-model-support-faster-inference-and-node-js-speech-recognition-393ea73ebcff)
-- [Whisper su NPU, bug di stato (#37937)](https://github.com/openvinotoolkit/openvino/issues/37937)
-- [Gemma 4 su NPU Lunar Lake](https://zenn.dev/jkudo/articles/ae85d7d099e672?locale=en)
-- [Valutazione small LM italiano/inglese (CLiC-it 2025)](https://aclanthology.org/2025.clicit-1.101.pdf)
-- [Best local STT 2026](https://openvoxai.com/blog/best-local-stt-transcription-models-2026) ·
-  [Northflank STT 2026](https://northflank.com/blog/best-open-source-speech-to-text-stt-model-in-2026-benchmarks) ·
-  [Cohere Transcribe](https://huggingface.co/blog/CohereLabs/cohere-transcribe-03-2026-release)
+**Diarization.** sherpa-onnx è leggero (~35 MB), funziona offline ed è abbastanza veloce su CPU.
+Un'alternativa su GPU Intel è `pyannote-openvino` (pyannote 3.1 convertito in IR), ma richiede torch
+e pyannote.audio.
+
+**NPU (PC di lavoro, Core Ultra).** `taccuino config profile npu` fa girare Whisper sulla NPU, così la GPU
+resta libera durante le call. Serve OpenVINO ≥ 2026.4 (la 2026.3 aveva un bug di stato con Whisper su NPU,
+openvinotoolkit/openvino#37937) e il driver [intel/linux-npu-driver](https://github.com/intel/linux-npu-driver).
+La diarization resta su CPU.
+
+## Dati
+
+- `~/.local/share/taccuino/meetings/<data>/`: `audio.flac` (stereo L=mic, R=sistema), `transcript.json`,
+  `notes.txt`, `meta.json`.
+- `~/Documents/Taccuino/*.md`: note finali.
+- Al cloud va solo il testo del transcript, inviato a Claude tramite Claude Code. L'audio resta sul PC.
