@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Taccuino</title>
+<style>
+:root{--bg:#fbfaf7;--panel:#fff;--ink:#1d1d1b;--mute:#76736c;--line:#e7e3da;--accent:#2f6b4f;--accent-ink:#fff;--rec:#b3261e;--chip:#f1eee6}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--panel:#1e1e1b;--ink:#ecebe6;--mute:#9b988f;--line:#2f2e2a;--accent:#7cc39c;--accent-ink:#10231a;--rec:#ff8a80;--chip:#2a2925}}
+*{box-sizing:border-box}[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 ui-sans-serif,system-ui,"Segoe UI",sans-serif;display:grid;grid-template-columns:260px 1fr;height:100vh}
+aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+aside header{padding:16px;display:flex;justify-content:space-between;align-items:center}
+aside h1{font-size:17px;margin:0;letter-spacing:-.01em}
+#list{overflow:auto;flex:1;padding:0 8px 8px}
+.item{padding:8px 10px;border-radius:8px;cursor:pointer}
+.item:hover,.item.on{background:var(--chip)}
+.item small{display:block;color:var(--mute);font-size:12px}
+#status{font-size:11.5px;color:var(--mute);padding:10px 16px;border-top:1px solid var(--line)}
+main{overflow:auto;min-height:0}
+.wrap{max-width:760px;margin:0 auto;padding:28px 24px 120px}
+input#title{font-size:26px;font-weight:650;border:0;background:none;color:var(--ink);width:100%;outline:none;letter-spacing:-.02em}
+.bar{display:flex;gap:8px;align-items:center;margin:12px 0 18px;flex-wrap:wrap}
+button{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:6px 12px;border-radius:999px;cursor:pointer}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+button.rec{color:var(--rec);border-color:var(--rec)}
+button:disabled{opacity:.5;cursor:default}
+.meter{display:inline-flex;gap:6px;align-items:center;font-size:12px;color:var(--mute)}
+.meter i{display:inline-block;width:40px;height:6px;background:var(--chip);border-radius:3px;overflow:hidden}
+.meter i b{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--rec);display:inline-block;animation:p 1.2s infinite}
+@keyframes p{50%{opacity:.25}}
+textarea{width:100%;min-height:200px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font:inherit;padding:14px;resize:vertical;outline:none}
+.label{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:22px 0 8px}
+#enhanced{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:4px 18px;min-height:40px}
+#enhanced:empty{display:none}
+#enhanced h2{font-size:17px;margin:18px 0 6px}#enhanced h3{font-size:15px;margin:14px 0 4px}
+#enhanced ul{padding-left:20px;margin:6px 0}
+details{margin-top:22px}
+summary{cursor:pointer;color:var(--mute);font-size:13px}
+#transcript{font-size:14px;max-height:420px;overflow:auto;padding-top:8px}
+.seg{display:grid;grid-template-columns:46px 52px 1fr;gap:8px;padding:3px 0}
+.seg .t{color:var(--mute);font-variant-numeric:tabular-nums;font-size:12px;padding-top:2px}
+.seg .w{font-size:12px;font-weight:600;padding-top:2px}.seg.me .w{color:var(--accent)}
+#ask{display:flex;gap:8px;margin-top:18px}
+#ask input{flex:1;border:1px solid var(--line);border-radius:999px;padding:8px 14px;background:var(--panel);color:var(--ink);font:inherit}
+#answer{white-space:pre-wrap;margin-top:10px;color:var(--ink)}
+#msg{font-size:13px;color:var(--mute)}
+.empty{color:var(--mute);text-align:center;margin-top:30vh}
+@media (max-width:700px){body{grid-template-columns:1fr}aside{display:none}.wrap{padding:16px}}
+</style>
+</head>
+<body>
+<aside>
+  <header><h1>Taccuino</h1><button class="primary" id="new">+ Nuova</button></header>
+  <div id="list"></div>
+  <label style="padding:0 16px 8px;font-size:12px;color:var(--mute);cursor:pointer">
+    <input type="file" id="file" accept="audio/*,video/*" hidden>⬆ Importa file audio/video</label>
+  <div id="status">…</div>
+</aside>
+<main><div class="wrap" id="view"><p class="empty">Crea una nuova riunione per iniziare.</p></div></main>
+
+<template id="tpl">
+  <input id="title" placeholder="Titolo riunione">
+  <div class="bar">
+    <button id="rec"></button>
+    <span class="meter" id="meter" hidden><span class="dot"></span> Io <i><b id="lm"></b></i> Altri <i><b id="lt"></b></i></span>
+    <button class="primary" id="enh">✨ Genera note</button>
+    <a id="exp" href="#"><button>Esporta .md</button></a>
+    <button id="del">Elimina</button>
+    <span id="msg"></span>
+  </div>
+  <div class="label">Le tue note</div>
+  <textarea id="notes" placeholder="Scrivi appunti veloci durante la riunione… l'AI li completerà con il transcript."></textarea>
+  <div class="label">Note generate</div>
+  <div id="enhanced"></div>
+  <div id="ask"><input id="q" placeholder="Chiedi qualcosa su questa riunione…"><button id="askb">Chiedi</button></div>
+  <div id="answer"></div>
+  <details open><summary>Transcript <span id="tc"></span></summary><div id="transcript"></div></details>
+</template>
+
+<script>
+// Nessun suono: l'interfaccia non riproduce audio di alcun tipo.
+const $ = s => document.querySelector(s);
+let cur = null, es = null, saveT = null, enhBuf = "";
+
+const api = (u, o={}) => fetch(u, {headers:{'Content-Type':'application/json'}, ...o}).then(async r => {
+  if (!r.ok) throw new Error((await r.json().catch(()=>({detail:r.statusText}))).detail); return r.json(); });
+
+function esc(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+function md(src){ // markdown minimo: titoli, elenchi, checkbox, grassetto
+  let html='', inList=false;
+  for (let l of esc(src).split('\n')) {
+    l = l.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`(.+?)`/g,'<code>$1</code>');
+    const li = l.match(/^\s*[-*]\s+(.*)/);
+    if (li) { if(!inList){html+='<ul>';inList=true}
+      html += '<li>' + li[1].replace(/^\[ \]/,'☐').replace(/^\[x\]/i,'☑') + '</li>'; continue; }
+    if (inList){html+='</ul>';inList=false}
+    const h = l.match(/^(#{1,4})\s+(.*)/);
+    if (h) html += `<h${Math.min(h[1].length+1,4)}>${h[2]}</h${Math.min(h[1].length+1,4)}>`;
+    else if (l.trim()) html += `<p>${l}</p>`;
+  }
+  return html + (inList?'</ul>':'');
+}
+const fmt = t => `${String(Math.floor(t/60)).padStart(2,'0')}:${String(Math.floor(t%60)).padStart(2,'0')}`;
+function addSeg(s){
+  const d = document.createElement('div'); d.className = 'seg ' + s.speaker;
+  d.innerHTML = `<span class="t">${fmt(s.t0)}</span><span class="w">${s.speaker==='me'?'Io':'Altri'}</span><span>${esc(s.text)}</span>`;
+  const box = $('#transcript'), atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
+  box.appendChild(d); if (atEnd) box.scrollTop = box.scrollHeight;
+  $('#tc').textContent = `(${box.children.length})`;
+}
+
+async function refreshList(){
+  const ms = await api('/api/meetings');
+  $('#list').innerHTML = ms.map(m => `<div class="item ${cur&&cur.id===m.id?'on':''}" data-id="${m.id}">
+    ${esc(m.title||'Senza titolo')}<small>${new Date(m.created*1000).toLocaleString('it-IT',{dateStyle:'medium',timeStyle:'short'})}</small></div>`).join('');
+  document.querySelectorAll('.item').forEach(e => e.onclick = () => open(+e.dataset.id));
+}
+async function refreshStatus(){
+  try { const s = await api('/api/status');
+    $('#status').innerHTML = `Profilo <b>${s.profile}</b><br>ASR: ${s.asr.replace('OpenVINO/','')}<br>LLM: ${s.llm.replace('OpenVINO/','')}`;
+  } catch(e){ $('#status').textContent = 'server non raggiungibile'; }
+}
+
+function setRec(on){
+  const b = $('#rec'); b.className = on ? 'rec' : ''; b.textContent = on ? '■ Stop' : '● Registra';
+  $('#meter').hidden = !on; cur.recording = on;
+}
+
+async function open(id){
+  cur = await api('/api/meetings/'+id); history.replaceState(null,'','#'+id);
+  $('#view').innerHTML = ''; $('#view').appendChild($('#tpl').content.cloneNode(true));
+  $('#title').value = cur.title; $('#notes').value = cur.notes;
+  $('#enhanced').innerHTML = cur.enhanced ? md(cur.enhanced) : '';
+  cur.segments.forEach(addSeg); setRec(cur.recording);
+  $('#exp').href = `/api/meetings/${id}/export.md`;
+  $('#msg').textContent = cur.busy ? 'In corso: '+cur.busy : '';
+  const save = () => { clearTimeout(saveT); saveT = setTimeout(() =>
+      api('/api/meetings/'+id,{method:'PATCH',body:JSON.stringify({title:$('#title').value,notes:$('#notes').value})}).then(refreshList), 500); };
+  $('#title').oninput = save; $('#notes').oninput = save;
+  $('#rec').onclick = async () => {
+    const b=$('#rec'); b.disabled = true;
+    try { if (cur.recording) { await api(`/api/meetings/${id}/stop`,{method:'POST'}); setRec(false); }
+          else { $('#msg').textContent='Carico Whisper sulla GPU…'; await api(`/api/meetings/${id}/start`,{method:'POST'}); setRec(true); $('#msg').textContent=''; } }
+    catch(e){ $('#msg').textContent = 'Errore: '+e.message; }
+    b.disabled = false;
+  };
+  $('#enh').onclick = async () => {
+    if (cur.recording) { await api(`/api/meetings/${id}/stop`,{method:'POST'}); setRec(false); }
+    try { await api(`/api/meetings/${id}/enhance`,{method:'POST'}); $('#enh').disabled = true; } catch(e){ $('#msg').textContent = e.message; }
+  };
+  $('#del').onclick = async () => { if (confirm('Eliminare questa riunione?')) { await api('/api/meetings/'+id,{method:'DELETE'}); cur=null; $('#view').innerHTML='<p class="empty">Eliminata.</p>'; refreshList(); } };
+  const ask = async () => { const q=$('#q').value.trim(); if(!q) return; $('#answer').textContent='…';
+    try { await api(`/api/meetings/${id}/ask`,{method:'POST',body:JSON.stringify({q})}); } catch(e){ $('#answer').textContent=e.message; } };
+  $('#askb').onclick = ask; $('#q').onkeydown = e => { if (e.key==='Enter') ask(); };
+
+  if (es) es.close();
+  es = new EventSource(`/api/meetings/${id}/events`);
+  es.onmessage = ev => {
+    const e = JSON.parse(ev.data);
+    if (e.type==='segment') addSeg(e);
+    else if (e.type==='level') { $('#lm').style.width = Math.min(100,e.me*800)+'%'; $('#lt').style.width = Math.min(100,e.them*800)+'%'; }
+    else if (e.type==='status') $('#msg').textContent = e.message;
+    else if (e.type==='backlog') $('#msg').textContent = e.n ? `${e.n} segmenti in coda` : '';
+    else if (e.type==='enhance_start') { enhBuf=''; $('#enhanced').innerHTML=''; }
+    else if (e.type==='token') { enhBuf += e.text; $('#enhanced').innerHTML = md(enhBuf); }
+    else if (e.type==='enhanced') { $('#enhanced').innerHTML = md(e.text); $('#msg').textContent=''; }
+    else if (e.type==='title') { $('#title').value = e.title; refreshList(); }
+    else if (e.type==='answer_start') $('#answer').textContent='';
+    else if (e.type==='answer_token') $('#answer').textContent += e.text;
+    else if (e.type==='done') { $('#enh').disabled=false; if (e.job!=='enhance') $('#msg').textContent=''; }
+    else if (e.type==='error') $('#msg').textContent = 'Errore: '+e.message;
+  };
+  refreshList();
+}
+
+$('#new').onclick = async () => { const m = await api('/api/meetings',{method:'POST',body:'{}'}); await open(m.id); $('#title').focus(); };
+$('#file').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return; const fd = new FormData(); fd.append('file', f);
+  const r = await fetch('/api/import',{method:'POST',body:fd}).then(r=>r.json()); await open(r.id); e.target.value='';
+};
+refreshList(); refreshStatus(); if (location.hash.length>1) open(+location.hash.slice(1)); setInterval(refreshStatus, 10000);
+</script>
+</body>
+</html>

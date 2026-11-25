@@ -1,0 +1,23 @@
+[project]
+name = "taccuino"
+version = "0.1.0"
+description = "Note di riunione locali in stile Granola, su Intel Iris Xe / Arc / NPU via OpenVINO"
+requires-python = ">=3.10"
+dependencies = [
+  "openvino-genai==2026.4.1.0",
+  "huggingface_hub>=0.25",
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "python-multipart>=0.0.9",
+  "numpy",
+]
+
+[project.scripts]
+taccuino = "taccuino.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-data]
+taccuino = ["static/*"]
