@@ -37,11 +37,17 @@ class Meeting:
         self.apps = set(apps or [])
         self.title = title
         self.rec: Recorder | None = None
+        self.live: subprocess.Popen | None = None
         self.save_meta()
 
     def save_meta(self):
-        (self.dir / "meta.json").write_text(json.dumps(
-            {"started": self.started, "manual": self.manual, "title": self.title, "apps": sorted(self.apps)}, indent=1))
+        p = self.dir / "meta.json"
+        try:
+            meta = json.loads(p.read_text())  # conserva cartella/nota scritte dal live worker
+        except (FileNotFoundError, ValueError):
+            meta = {}
+        meta.update(started=self.started, manual=self.manual, title=self.title, apps=sorted(self.apps))
+        p.write_text(json.dumps(meta, indent=1))
 
 
 class Daemon:
@@ -62,6 +68,9 @@ class Daemon:
         m = Meeting(manual, title, apps)
         m.rec = Recorder(self.s.mic_source, self.s.system_source, m.dir / "audio.flac")
         m.rec.start()
+        if self.s.live_transcribe:  # trascrizione + appunti live in un processo a parte
+            m.live = subprocess.Popen([sys.executable, "-m", "taccuino.cli", "live-worker", str(m.dir)],
+                                      stdin=subprocess.DEVNULL)
         self.meeting = m
         log(f"● registrazione avviata ({'manuale' if manual else ', '.join(m.apps)}) → {m.dir.name}")
 
@@ -75,14 +84,29 @@ class Daemon:
         m.save_meta()
         if err.strip():
             log(f"ffmpeg: {err.strip()[-300:]}")
-        if dur < self.s.min_meeting_seconds and not m.manual:
+        short = dur < self.s.min_meeting_seconds and not m.manual
+        if m.live and m.live.poll() is None:
+            if short:
+                m.live.kill()
+                m.live.wait()
+            else:
+                m.live.terminate()  # fa l'ultimo giro di correzione/appunti, poi esce
+        if short:
             log(f"■ registrazione di {dur:.0f}s scartata (troppo corta)")
             for f in m.dir.iterdir():
                 f.unlink()
             m.dir.rmdir()
             return
         log(f"■ registrazione chiusa dopo {dur / 60:.1f} min {reason}; in coda per l'elaborazione")
-        self.jobs.put(m.dir)
+
+        def enqueue(live=m.live, d=m.dir):  # aspetta il live worker senza bloccare il rilevamento
+            if live:
+                try:
+                    live.wait(timeout=150)
+                except subprocess.TimeoutExpired:
+                    live.kill()
+            self.jobs.put(d)
+        threading.Thread(target=enqueue, daemon=True).start()
 
     # ---------- elaborazione ----------
     def _worker(self):

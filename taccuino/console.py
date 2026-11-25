@@ -163,9 +163,13 @@ class Console:
 
     # ---------- trascrizione in streaming (solo mentre la console è aperta) ----------
     def _bg(self):
+        """Mostra le righe live. Di norma trascrive il live worker del daemon e qui si legge soltanto;
+        se il worker non c'è (live_transcribe spento), trascrive la console stessa."""
         from .live import Cleaner
         cleaning = threading.Event()
         last_speech = time.time()
+        shown: set[int] = set()
+        cur_dir = None
         while not self.stop_ev.wait(0.2):
             mdir, st = self.meeting()
             if not (st and st["recording"] and mdir):
@@ -173,42 +177,47 @@ class Console:
                     self._draw(draft="")
                 continue
             lt = self._lt(mdir)
+            first = cur_dir != mdir
+            if first:
+                shown, cur_dir = set(), mdir
             try:
-                with self.lock:
-                    if lt.asr is None:
-                        self.say(DIM("carico il modello di trascrizione …"))
-                        lt.load()
-                        if time.time() - st["since"] - lt.cursor > 60:
-                            self.say(DIM("recupero l'audio già registrato …"))
-                            lt.update()
-                    _, draft, trailing = lt.step()
+                if lt.driver_alive():
+                    draft, trailing = lt.shared_draft(), 1.0
+                else:
+                    with self.lock:
+                        if lt.asr is None:
+                            self.say(DIM("carico il modello di trascrizione …"))
+                            lt.load()
+                            if time.time() - st["since"] - lt.cursor > 60:
+                                self.say(DIM("recupero l'audio già registrato …"))
+                                lt.update()
+                        _, draft, trailing = lt.step()
             except Exception as e:  # noqa: BLE001
                 self.say(RED(f"trascrizione live: {e}"))
                 self.stop_ev.wait(5)
                 continue
             if trailing < 0.3:
                 last_speech = time.time()
-            cl = Cleaner(lt)
-            todo = cl.pending()
-            lines = lt.lines()
-            raw = " ".join(lines[i].text for i in todo)
-            self._draw(draft=(raw + " " + draft).strip())
-            # Haiku corregge nelle pause (o se il testo in attesa si allunga troppo)
-            if todo and not cleaning.is_set() and (time.time() - last_speech > 1.2 or len(todo) >= 6):
-                cleaning.set()
+            lines, fixed = lt.lines(), lt.cleaned()
+            new = [i for i in sorted(fixed) if i not in shown and i < len(lines)]
+            if first:  # all'apertura solo le ultime righe
+                shown.update(new[:-10])
+                new = new[-10:]
+            shown.update(new)
+            out = [_fmt(Line(lines[i].start, lines[i].end, lines[i].speaker, fixed[i])) for i in new if fixed[i]]
+            raw = " ".join(lines[i].text for i in range(len(lines)) if i not in fixed)
+            self._draw(out if self.show_live else [], draft=(raw + " " + draft).strip())
+            if lt.driving and not cleaning.is_set():
+                todo = Cleaner(lt).pending()
+                if todo and (time.time() - last_speech > 1.2 or len(todo) >= 6):
+                    cleaning.set()
 
-                def work(cl=cl, lt=lt):
-                    try:
-                        idx = cl.run()
-                        fixed, lines = lt.cleaned(), lt.lines()
-                        out = [_fmt(Line(lines[i].start, lines[i].end, lines[i].speaker, fixed[i]))
-                               for i in idx if fixed.get(i)]
-                        rest = set(cl.pending())
-                        raw = " ".join(lines[i].text for i in sorted(rest))
-                        self._draw(out if self.show_live else [], draft=(raw + " " + lt._draft).strip())
-                    finally:
-                        cleaning.clear()
-                threading.Thread(target=work, daemon=True).start()
+                    def work(lt=lt):
+                        try:
+                            Cleaner(lt).run()
+                        finally:
+                            cleaning.clear()
+                    threading.Thread(target=work, daemon=True).start()
 
     # ---------- comandi ----------
     def window(self, lines: list[Line], minutes: float) -> list[Line]:

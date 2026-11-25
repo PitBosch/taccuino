@@ -42,6 +42,20 @@ journalctl --user -u taccuino -f    # log
 Requisiti: PipeWire (con pipewire-pulse), ffmpeg, Claude Code autenticato (`claude` nel PATH).
 Se `taccuino devices` non vede la GPU: `sudo usermod -aG render $USER` e poi rientra nella sessione.
 
+## Durante la call
+
+Il daemon lancia per tutta la durata della call un **live worker** (processo separato, con Whisper caricato
+solo in quel momento):
+- trascrive in streaming il FLAC che si sta scrivendo e nelle pause fa correggere le frasi a Haiku;
+- ogni `live_notes_minutes` (default 3) Haiku legge cosa si è detto e aggiunge **appunti mirati**
+  (decisioni, azioni, numeri, date, problemi) alla nota della riunione, già nella **sottocartella** di
+  `~/Documents/Taccuino` che sceglie lui alla prima passata;
+- a fine call la pipeline completa (diarization + note finali) riscrive la stessa nota con il titolo finale,
+  tenendo la sezione "Appunti di Claude durante la riunione".
+
+Console e sottotitoli leggono i file del worker: si aprono all'istante e non caricano modelli.
+`taccuino config live_transcribe false` spegne tutto questo (la console torna a trascrivere da sola).
+
 ## Console
 
 Scrivi `taccuino` e si apre un'interfaccia in stile Claude Code sulla riunione in corso (o sull'ultima):

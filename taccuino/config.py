@@ -68,6 +68,10 @@ class Settings:
     claude_bin: str = field(default_factory=lambda: shutil.which("claude") or str(Path.home() / ".local/bin/claude"))
     claude_extra_prompt: str = ""    # istruzioni aggiuntive (es. "usa sempre l'inglese")
 
+    # --- durante la call ---
+    live_transcribe: bool = True     # trascrizione in streaming durante la call (processo separato)
+    live_notes_minutes: float = 3.0  # ogni quanti minuti Claude aggiunge appunti alla nota (0 = mai)
+
     keep_audio_days: int = 14  # 0 = cancella l'audio dopo l'elaborazione
 
     # --- trascrizione ---

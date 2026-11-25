@@ -77,6 +77,7 @@ def main(argv=None):
     sub.add_parser("riassumi").add_argument("minutes", nargs="?", default="5")
     sub.add_parser("chiedi").add_argument("question", nargs="+")
     sub.add_parser("sottotitoli")
+    sub.add_parser("live-worker").add_argument("dir")
     sub.add_parser("start").add_argument("title", nargs="?", default="")
     sub.add_parser("note").add_argument("text", nargs="+")
     p = sub.add_parser("process"); p.add_argument("path"); p.add_argument("--title", default="")
@@ -97,6 +98,10 @@ def main(argv=None):
         except ImportError:  # niente terminale (o prompt_toolkit mancante): console semplice
             from .console import run
         run()
+
+    elif a.cmd == "live-worker":
+        from .live_worker import run
+        run(a.dir)
 
     elif a.cmd == "sottotitoli":
         from .captions import run

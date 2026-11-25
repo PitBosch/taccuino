@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 import numpy as np
@@ -100,6 +102,19 @@ class LiveTranscript:
         if text != self._draft:
             self.draft_path.write_text(text)
         self._draft, self._draft_len = text, n
+
+    # ---------- chi trascrive ----------
+    # Durante le call trascrive il "live worker" lanciato dal daemon; console e sottotitoli leggono soltanto.
+    def beat(self):
+        (self.mdir / "live.driver").write_text(f"{os.getpid()} {time.time():.1f}")
+
+    def driver_alive(self) -> bool:
+        """True se un ALTRO processo sta trascrivendo (heartbeat recente)."""
+        try:
+            pid, ts = (self.mdir / "live.driver").read_text().split()
+            return int(pid) != os.getpid() and time.time() - float(ts) < 5
+        except (FileNotFoundError, ValueError):
+            return False
 
     def shared_draft(self) -> str:
         """Bozza corrente, anche se la sta producendo un altro processo (console o sottotitoli)."""
@@ -209,7 +224,7 @@ class LiveTranscript:
     def update(self, final: bool = False, log=lambda _: None) -> int:
         """Recupera in blocco tutto l'audio non ancora trascritto (apertura tardiva, riassunti da script)."""
         audio = self.mdir / "audio.flac"
-        if not audio.exists() or not (lock := self._locked()):
+        if not audio.exists() or (not final and self.driver_alive()) or not (lock := self._locked()):
             return 0
         with lock:
             start = self.cursor
@@ -233,7 +248,7 @@ class LiveTranscript:
     def step(self) -> tuple[list[Line], str, float]:
         """Un passo dello streaming: (righe appena fissate, bozza corrente, secondi di silenzio finale)."""
         audio = self.mdir / "audio.flac"
-        lock = self._locked() if audio.exists() else None
+        lock = self._locked() if audio.exists() and not self.driver_alive() else None
         self.driving = bool(lock)
         if not lock:
             return [], self.shared_draft(), 0.0

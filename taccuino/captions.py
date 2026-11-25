@@ -39,7 +39,8 @@ class Captions:
         self.con = Console()            # riusa comandi, stato e logica Claude della console
         self.q: queue.Queue = queue.Queue()
         self.lt = None
-        self.shown: set[int] = set()
+        self.shown: set[int] = set()        # righe già a schermo
+        self.fixed_shown: set[int] = set()  # righe già a schermo nella versione corretta
         self.draft = ""
         self.stop = threading.Event()
 
@@ -62,6 +63,7 @@ class Captions:
         self.text.tag_configure("Io", foreground=IO)
         self.text.tag_configure("Call", foreground=CALL)
         self.text.tag_configure("draft", foreground=DIMC, font=("TkDefaultFont", 11, "italic"))
+        self.text.tag_configure("raw", foreground="#b9b9c0")  # in attesa della correzione di Haiku
         self.text.tag_configure("answer", foreground=ANS, lmargin1=12, lmargin2=12)
         self.text.tag_configure("info", foreground=DIMC)
         self.text.tag_configure("cmd", foreground=DIMC)
@@ -101,6 +103,21 @@ class Captions:
         t.configure(state="disabled")
         t.see("end")  # sempre sull'ultima riga
 
+    def _fix(self, i: int, text: str):
+        t = self.text
+        L, T = f"L{i}", f"T{i}"
+        r = t.tag_ranges(L)
+        if not r:
+            return
+        t.configure(state="normal")
+        if not text:  # allucinazione scartata da Haiku
+            t.delete(r[0], r[1])
+        elif (rt := t.tag_ranges(T)):
+            t.delete(rt[0], rt[1])
+            t.insert(rt[0], text, (T, L))
+        t.configure(state="disabled")
+        t.see("end")
+
     def _set_draft(self, d: str):
         if d != self.draft:
             self.draft = d
@@ -132,11 +149,15 @@ class Captions:
         try:
             while True:
                 kind, val = self.q.get_nowait()
-                if kind == "lines":
-                    parts = []
-                    for l in val:
-                        parts += [(self.fmt_ts(l.start) + " ", "ts"), (l.speaker, l.speaker), (f"  {l.text}\n", "")]
-                    self._append(parts)
+                if kind == "line":  # frase appena fissata: subito a schermo (grezza o già corretta)
+                    i, l, ok = val
+                    if l.text:
+                        L, T = f"L{i}", f"T{i}"
+                        self._append([(self.fmt_ts(l.start) + " ", ("ts", L)), (l.speaker, (l.speaker, L)),
+                                      ("  ", L), (l.text, (T, L) if ok else (T, L, "raw")), ("\n", L)])
+                elif kind == "fix":  # Haiku ha corretto la frase: sostituisci sul posto
+                    i, text = val
+                    self._fix(i, text)
                 elif kind == "draft":
                     self._set_draft(val)
                 elif kind == "status":
@@ -183,7 +204,7 @@ class Captions:
                 asr = self.lt.asr if self.lt else None
                 self.lt = LiveTranscript(mdir, self.con.s)
                 self.lt.asr = asr
-                self.shown = set()
+                self.shown, self.fixed_shown = set(), set()
                 self.q.put(("answer", f"— nuova registrazione {mdir.name} —"))
             lt = self.lt
             try:
@@ -195,19 +216,23 @@ class Captions:
                 continue
             if trailing < 0.3:
                 last_speech = time.time()
+            from .pipeline import Line
             lines, fixed = lt.lines(), lt.cleaned()
-            new = [i for i in sorted(fixed) if i not in self.shown and i < len(lines)]
-            if new and not self.shown:  # all'apertura mostra solo le ultime righe
-                self.shown.update(new[:-20])
-                new = new[-20:]
-            if new:
-                self.shown.update(new)
-                from .pipeline import Line
-                self.q.put(("lines", [Line(lines[i].start, lines[i].end, lines[i].speaker, fixed[i])
-                                      for i in new if fixed[i]]))
+            if not self.shown and not self.fixed_shown:  # all'apertura mostra solo le ultime righe
+                self.shown.update(range(max(0, len(lines) - 20)))
+                self.fixed_shown.update(i for i in fixed if i in self.shown)
+            for i, l in enumerate(lines):
+                if i not in self.shown:
+                    self.shown.add(i)
+                    ok = i in fixed
+                    if ok:
+                        self.fixed_shown.add(i)
+                    self.q.put(("line", (i, Line(l.start, l.end, l.speaker, fixed.get(i, l.text)), ok)))
+                elif i in fixed and i not in self.fixed_shown:
+                    self.fixed_shown.add(i)
+                    self.q.put(("fix", (i, fixed[i])))
             todo = [i for i in range(len(lines)) if i not in fixed]
-            raw = " ".join(lines[i].text for i in todo)
-            self.q.put(("draft", (raw + " " + draft).strip()))
+            self.q.put(("draft", draft.strip()))
             if lt.driving and todo and not cleaning.is_set() and (time.time() - last_speech > 1.2 or len(todo) >= 6):
                 cleaning.set()
 

@@ -163,13 +163,20 @@ def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
         md += ["## I miei appunti", "", user_notes, ""]
     if notes:
         md += [notes.strip(), ""]
+    live_notes = (mdir / "live_notes.md").read_text().strip() if (mdir / "live_notes.md").exists() else ""
+    if live_notes:
+        md += ["## Appunti di Claude durante la riunione", "", live_notes, ""]
     md += ["---", "", "## Transcript", "", transcript or "_(nessun parlato rilevato)_", ""]
 
     outdir = Path(s.output_dir) / folder  # sottocartella scelta da Claude (vuota = radice)
     outdir.mkdir(parents=True, exist_ok=True)
     old = meta.get("output")
-    out = Path(old) if old and Path(old).exists() else outdir / f"{started:%Y-%m-%d %H.%M} - {_slug(title)}.md"
+    name = f"{started:%Y-%m-%d %H.%M} - {_slug(title)}.md"
+    # se il live worker ha già creato la nota provvisoria, resta nella sua cartella ma prende il titolo finale
+    out = (Path(old).parent / name) if old and Path(old).exists() else outdir / name
     out.write_text("\n".join(md))
+    if old and Path(old).exists() and Path(old) != out and "in corso…" in Path(old).read_text()[:300]:
+        Path(old).unlink()
     meta.update(title=title, folder=folder, output=str(out), processed=time.time(), duration=duration)
     (mdir / "meta.json").write_text(json.dumps(meta, indent=1))
     if s.keep_audio_days == 0:
