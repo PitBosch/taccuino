@@ -83,6 +83,9 @@ class Settings:
     # --- durante la call ---
     live_transcribe: bool = True     # trascrizione in streaming durante la call (processo separato)
     live_notes_minutes: float = 3.0  # ogni quanti minuti Claude aggiunge appunti alla nota (0 = mai)
+    # a fine call: False = nota dalla trascrizione live (veloce, niente GPU); True = ritrascrive tutto con
+    # diarization (speaker separati, più preciso, qualche minuto di GPU)
+    final_transcribe: bool = False
 
     keep_audio_days: int = 14  # 0 = cancella l'audio dopo l'elaborazione
 

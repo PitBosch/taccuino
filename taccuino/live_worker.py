@@ -181,6 +181,7 @@ def run(mdir: str):
         while ev.is_set():
             time.sleep(0.2)
     try:
+        lt.update(final=True)  # l'ultimo pezzo di audio dopo l'ultima pausa
         Cleaner(lt).run()
         notes.run(final=True)
     except Exception as e:  # noqa: BLE001

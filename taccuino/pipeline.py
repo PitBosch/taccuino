@@ -134,11 +134,30 @@ def _slug(t: str) -> str:
     return re.sub(r"[^\w\- àèéìòù]+", "", t).strip()[:60]
 
 
+def _duration(path: Path) -> float:
+    import subprocess
+    from .compat import NO_WINDOW
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+                       capture_output=True, text=True, **NO_WINDOW)
+    try:
+        return float(r.stdout.strip())
+    except ValueError:
+        return 0.0
+
+
 def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
     """Elabora una cartella riunione (audio.flac, meta.json, notes.txt) e scrive il Markdown."""
     meta = json.loads((mdir / "meta.json").read_text()) if (mdir / "meta.json").exists() else {}
     audio = mdir / "audio.flac"
-    lines, duration = transcribe_recording(audio, s, log)
+    if not s.final_transcribe and (mdir / "live.jsonl").exists():
+        # di default si usa la trascrizione fatta durante la call (già corretta da Haiku): niente
+        # diarization né secondo passaggio di Whisper, la nota arriva in pochi secondi
+        from .live import LiveTranscript
+        lines = LiveTranscript(mdir, s).clean_lines()
+        duration = _duration(audio) if audio.exists() else (lines[-1].end if lines else 0.0)
+        log(f"uso la trascrizione live ({len(lines)} righe)")
+    else:
+        lines, duration = transcribe_recording(audio, s, log)
     (mdir / "transcript.json").write_text(json.dumps([asdict(l) for l in lines], ensure_ascii=False, indent=1))
     started = datetime.fromtimestamp(meta.get("started", audio.stat().st_mtime))
     user_notes = (mdir / "notes.txt").read_text().strip() if (mdir / "notes.txt").exists() else ""

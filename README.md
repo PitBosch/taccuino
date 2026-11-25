@@ -50,8 +50,10 @@ solo in quel momento):
 - ogni `live_notes_minutes` (default 3) Haiku legge cosa si è detto e aggiunge **appunti mirati**
   (decisioni, azioni, numeri, date, problemi) alla nota della riunione, già nella **sottocartella** di
   `~/Documents/Taccuino` che sceglie lui alla prima passata;
-- a fine call la pipeline completa (diarization + note finali) riscrive la stessa nota con il titolo finale,
-  tenendo la sezione "Appunti di Claude durante la riunione".
+- a fine call Haiku scrive la nota finale **dalla trascrizione live** (pochi secondi, niente GPU), nella
+  stessa cartella, con il titolo finale e la sezione "Appunti di Claude durante la riunione".
+  Per avere anche gli speaker separati (diarization + secondo passaggio di Whisper, qualche minuto di GPU):
+  `taccuino config final_transcribe true`.
 
 Console e sottotitoli leggono i file del worker: si aprono all'istante e non caricano modelli.
 `taccuino config live_transcribe false` spegne tutto questo (la console torna a trascrivere da sola).
@@ -161,6 +163,8 @@ Impostazioni (`taccuino config` le mostra tutte, `taccuino config KEY VALUE` le 
 | `min_meeting_seconds` | 60 | sotto questa durata la registrazione viene scartata (es. vocali) |
 | `num_speakers` | -1 | -1 = automatico; impostalo se sai quante persone ci sono |
 | `cluster_threshold` | 0.6 | più alto = meno speaker |
+| `final_transcribe` | false | true = a fine call ritrascrive tutto con diarization (più lento) |
+| `live_notes_minutes` | 3 | ogni quanti minuti Claude aggiunge appunti durante la call (0 = mai) |
 | `keep_audio_days` | 14 | 0 = cancella l'audio subito dopo l'elaborazione |
 
 ## Prestazioni misurate (i5-1145G7, Iris Xe 80 EU, 16 GB)
