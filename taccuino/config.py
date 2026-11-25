@@ -12,10 +12,17 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-DATA_DIR = Path(os.environ.get("TACCUINO_HOME", Path.home() / ".local/share/taccuino"))
+def _default_data_dir() -> Path:
+    if sys.platform == "win32":  # %LOCALAPPDATA%\taccuino
+        return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "taccuino"
+    return Path.home() / ".local/share/taccuino"
+
+
+DATA_DIR = Path(os.environ.get("TACCUINO_HOME", _default_data_dir()))
 MODELS_DIR = DATA_DIR / "models"
 MEETINGS_DIR = DATA_DIR / "meetings"
 CONFIG_PATH = DATA_DIR / "config.json"
@@ -35,9 +42,13 @@ EMBEDDING_URL = ("https://github.com/k2-fsa/sherpa-onnx/releases/download/speake
 
 
 def _default_output_dir() -> str:
-    for name in ("Documenti", "Documents"):
-        if (Path.home() / name).is_dir():
-            return str(Path.home() / name / "Taccuino")
+    homes = [Path.home()]
+    if sys.platform == "win32" and os.environ.get("OneDrive"):  # Documenti spesso spostati su OneDrive
+        homes.insert(0, Path(os.environ["OneDrive"]))
+    for home in homes:
+        for name in ("Documenti", "Documents"):
+            if (home / name).is_dir():
+                return str(home / name / "Taccuino")
     return str(Path.home() / "Taccuino")
 
 
@@ -65,7 +76,8 @@ class Settings:
 
     # --- Claude Code ---
     summarize: bool = True
-    claude_bin: str = field(default_factory=lambda: shutil.which("claude") or str(Path.home() / ".local/bin/claude"))
+    claude_bin: str = field(default_factory=lambda: shutil.which("claude") or str(
+        Path.home() / ".local/bin" / ("claude.exe" if sys.platform == "win32" else "claude")))
     claude_extra_prompt: str = ""    # istruzioni aggiuntive (es. "usa sempre l'inglese")
 
     keep_audio_days: int = 14  # 0 = cancella l'audio dopo l'elaborazione

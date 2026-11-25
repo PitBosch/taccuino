@@ -4,8 +4,10 @@
   taccuino riassumi [MIN]         riassume gli ultimi MIN minuti (default 5) della riunione
   taccuino chiedi "domanda"       domanda a Claude sulla riunione in corso (o l'ultima)
   taccuino sottotitoli            finestrina sempre in primo piano con la trascrizione live
-  taccuino daemon                 avvia il servizio sempre attivo (di solito via systemd)
-  taccuino install-service        installa e avvia il servizio systemd utente
+  taccuino daemon                 avvia il servizio sempre attivo (di solito via systemd / Utilità di pianificazione)
+  taccuino install-service        installa e avvia il servizio (systemd utente su Linux, attività all'accesso su Windows)
+  taccuino uninstall-service      ferma e rimuove il servizio
+  taccuino quit                   ferma il daemon (chiude bene la registrazione in corso)
   taccuino status                 stato del daemon e app che usano il microfono
   taccuino start ["titolo"]       avvia una registrazione manuale (es. riunione dal vivo)
   taccuino stop                   ferma la registrazione in corso
@@ -29,6 +31,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from .compat import IS_WIN
 from .config import CONTROL_PATH, DATA_DIR, MEETINGS_DIR, STATE_PATH, load_settings, save_settings
 
 SERVICE = """[Unit]
@@ -46,6 +49,23 @@ Nice=5
 [Install]
 WantedBy=default.target
 """
+
+
+WIN_TASK = "Taccuino"
+
+
+def _win_install_service():
+    """Windows: attività dell'Utilità di pianificazione che avvia il daemon (senza finestra) all'accesso."""
+    exe = Path(sys.executable)
+    pyw = exe.with_name("pythonw.exe")
+    pyw = pyw if pyw.exists() else exe
+    tr = f'"{pyw}" -X utf8 -m taccuino.cli daemon'
+    r = subprocess.run(["schtasks", "/Create", "/SC", "ONLOGON", "/TN", WIN_TASK, "/TR", tr, "/RL", "LIMITED", "/F"],
+                       capture_output=True, text=True)
+    if r.returncode:
+        sys.exit("schtasks: " + (r.stderr or r.stdout).strip())
+    subprocess.run(["schtasks", "/Run", "/TN", WIN_TASK], capture_output=True)
+    print(f"Attività \"{WIN_TASK}\" creata: parte a ogni accesso.\nLog: {DATA_DIR / 'daemon.log'}")
 
 
 def _state():
@@ -71,7 +91,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="taccuino", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--profile", help="xe | npu | cpu")
     sub = ap.add_subparsers(dest="cmd")
-    for c in ("daemon", "install-service", "status", "stop", "list", "devices", "download"):
+    for c in ("daemon", "install-service", "uninstall-service", "quit", "status", "stop", "list", "devices",
+              "download"):
         sub.add_parser(c)
     sub.add_parser("console").add_argument("--plain", action="store_true", help="console semplice, senza TUI")
     sub.add_parser("riassumi").add_argument("minutes", nargs="?", default="5")
@@ -84,6 +105,9 @@ def main(argv=None):
     sub.add_parser("summarize").add_argument("dir")
     c = sub.add_parser("config"); c.add_argument("key", nargs="?"); c.add_argument("value", nargs="?")
     a = ap.parse_args(argv)
+    if IS_WIN and not sys.flags.utf8_mode and a.cmd not in ("daemon", "process"):
+        print("⚠ Python non è in modalità UTF-8: esegui una volta `setx PYTHONUTF8 1` e riapri il terminale "
+              "(altrimenti accenti e note possono rovinarsi).", file=sys.stderr)
     if a.profile:
         os.environ["TACCUINO_PROFILE"] = a.profile
     s = load_settings()
@@ -110,6 +134,25 @@ def main(argv=None):
     elif a.cmd == "daemon":
         from .daemon import run
         run()
+
+    elif a.cmd == "install-service" and IS_WIN:
+        _win_install_service()
+
+    elif a.cmd == "uninstall-service":
+        if _state():
+            _send("quit")
+        if IS_WIN:
+            subprocess.run(["schtasks", "/End", "/TN", WIN_TASK], capture_output=True)
+            r = subprocess.run(["schtasks", "/Delete", "/TN", WIN_TASK, "/F"], capture_output=True, text=True)
+            print("Attività rimossa" if r.returncode == 0 else (r.stderr or r.stdout).strip())
+        else:
+            subprocess.run(["systemctl", "--user", "disable", "--now", "taccuino.service"])
+            (Path.home() / ".config/systemd/user/taccuino.service").unlink(missing_ok=True)
+            subprocess.run(["systemctl", "--user", "daemon-reload"])
+            print("Servizio rimosso")
+
+    elif a.cmd == "quit":
+        _send("quit"); print("daemon fermato")
 
     elif a.cmd == "install-service":
         exe = shutil.which("taccuino") or str(Path(sys.argv[0]).resolve())
@@ -166,9 +209,16 @@ def main(argv=None):
         for d in core.available_devices:
             print(f"{d:6} {core.get_property(d, 'FULL_DEVICE_NAME')}")
         if "NPU" not in core.available_devices:
-            print("NPU    non trovata (serve Core Ultra + driver intel/linux-npu-driver)")
-        out = subprocess.run(["ffmpeg", "-hide_banner", "-sources", "pulse"], capture_output=True, text=True)
-        print("\nSorgenti audio:\n" + (out.stdout or out.stderr))
+            print("NPU    non trovata (serve Core Ultra + driver NPU Intel"
+                  f"{'' if IS_WIN else ': intel/linux-npu-driver'})")
+        if IS_WIN:
+            from .winaudio import list_devices
+            print("\n" + list_devices())
+        else:
+            out = subprocess.run(["ffmpeg", "-hide_banner", "-sources", "pulse"], capture_output=True, text=True)
+            print("\nSorgenti audio:\n" + (out.stdout or out.stderr))
+        if not shutil.which("ffmpeg"):
+            print("\n⚠ ffmpeg non trovato nel PATH" + (" (winget install Gyan.FFmpeg)" if IS_WIN else ""))
 
     elif a.cmd == "download":
         from .engines import ensure_diarization_models, ensure_whisper
