@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import queue
 import signal
+import subprocess
+import sys
 import threading
 import time
 import traceback
@@ -19,7 +21,7 @@ from pathlib import Path
 from .audio import Recorder
 from .config import CONTROL_PATH, MEETINGS_DIR, STATE_PATH, load_settings
 from .detect import mic_users
-from .pipeline import cleanup_audio, process_meeting
+from .pipeline import cleanup_audio
 
 
 def log(msg: str):
@@ -89,7 +91,12 @@ class Daemon:
             self.processing = d.name
             self.write_state()
             try:
-                process_meeting(d, load_settings(), log=lambda msg: log(f"[{d.name}] {msg}"))
+                # processo separato: diarization e Whisper non bloccano il rilevamento delle call
+                # (le librerie native tengono il GIL e fermerebbero il ciclo principale)
+                r = subprocess.run([sys.executable, "-m", "taccuino.cli", "process", str(d)],
+                                   stdin=subprocess.DEVNULL)
+                if r.returncode:
+                    log(f"[{d.name}] elaborazione fallita (exit {r.returncode})")
             except Exception:  # noqa: BLE001
                 log(f"[{d.name}] errore:\n{traceback.format_exc()}")
             finally:

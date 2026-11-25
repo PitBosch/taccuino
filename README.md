@@ -42,6 +42,41 @@ journalctl --user -u taccuino -f    # log
 Requisiti: PipeWire (con pipewire-pulse), ffmpeg, Claude Code autenticato (`claude` nel PATH).
 Se `taccuino devices` non vede la GPU: `sudo usermod -aG render $USER` e poi rientra nella sessione.
 
+## Console
+
+Scrivi `taccuino` e si apre un'interfaccia in stile Claude Code sulla riunione in corso (o sull'ultima):
+
+```
+> r 1
+⏺ Si è parlato della revisione del montaggio: tenere il pezzo con Paolino, rivedere l'audio del ponte.
+  (4s · Haiku)
+
+  10:06 Io: Ci sono 30 secondi di ritardo, secondo me serve un filtro prima.
+  … e poi la parte sul ponte va rivista perché                     ← bozza live (grigia)
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ > r riassumi · t trascrizione · n nota · /help  —  o fai una domanda         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ ● REC 16:18 · Google Chrome input                                       Haiku
+```
+
+| comando | cosa fa |
+|---|---|
+| `r [min]` · `/riassumi` | riassunto degli ultimi N minuti (default 5) |
+| `t [min]` · `/trascrizione` | trascrizione degli ultimi N minuti |
+| `n testo` · `/nota` | appunto con timestamp |
+| `/start [titolo]` · `/stop` | registrazione manuale |
+| `/live` · `/stato` · `/help` · `/esci` | |
+| qualsiasi frase | domanda a Claude Haiku sulla riunione |
+
+Scrivendo `/` compare il menu dei comandi (Tab completa, ↑↓ per scegliere); Esc annulla una risposta in
+arrivo; Ctrl-D esce. Senza terminale (input da pipe) o con `taccuino console --plain` parte la console semplice.
+
+È leggera: il daemon durante la call **registra soltanto**. La trascrizione live parte solo mentre la
+console è aperta (o quando chiedi qualcosa), lavora a blocchi sul FLAC che si sta ancora scrivendo e salva
+il risultato in `live.jsonl`, quindi trascrive solo l'audio nuovo. Le righe live sono "Io" (microfono) e
+"Call" (sistema), senza diarization. Il transcript completo con gli speaker separati arriva a fine riunione.
+Anche da script: `taccuino riassumi 5`, `taccuino chiedi "…"`.
+
 ## Uso quotidiano
 
 ```bash
@@ -62,7 +97,6 @@ Impostazioni (`taccuino config` le mostra tutte, `taccuino config KEY VALUE` le 
 | `asr_model` | — | sostituisce il modello del profilo (repo HF OpenVINO) |
 | `language` | `it` | `en`, oppure `auto` (sconsigliato: Whisper allucina in inglese sui silenzi) |
 | `vocabulary` | — | nomi e termini ricorrenti: migliora la trascrizione |
-| `claude_model` | `haiku` | modello usato da Claude Code |
 | `claude_extra_prompt` | — | istruzioni extra per le note |
 | `ignore_apps` | ffmpeg, obs… | app che aprono il microfono senza essere riunioni |
 | `start_delay` / `stop_delay` | 5 s / 20 s | isteresi del rilevamento |
@@ -100,6 +134,9 @@ Benchmark su Iris Xe (clip italiana di 2 min, finestre da 20 s, `scripts/bench_a
 |---|---|---|---|
 | Whisper large-v3-turbo int8 | 2,4 s | **0,13** | buona; a volte salta frasi pronunciate in fretta |
 | Qwen3-ASR 1.7B int8 (`circulus/…`) | 12,5 s | 0,45 | coglie più frasi, ma storpia di più i nomi propri (Florianópolis → "Firenopolis") |
+
+WER su 120 frasi italiane di FLEURS test (30 min di audio, GPU Iris Xe): **Whisper turbo 2,91%** (RTF 0,22),
+Qwen3-ASR 1.7B 3,43% (RTF 0,63). Fun-ASR non supporta l'italiano.
 
 Whisper turbo resta il default (3,4× più veloce, qualità comparabile). Qwen3-ASR si può attivare con
 `taccuino config asr_model circulus/Qwen3-ASR-1.7B-int8-ov`. Attenzione: la conversione `paloik/…`

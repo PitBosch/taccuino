@@ -31,7 +31,9 @@ class Recorder:
                "[0:a]aresample=16000,pan=mono|c0=0.5*c0+0.5*c1[m];"
                "[1:a]aresample=16000,pan=mono|c0=0.5*c0+0.5*c1[s];"
                "[m][s]join=inputs=2:channel_layout=stereo[out]",
-               "-map", "[out]", "-ar", str(SR), "-c:a", "flac", str(self.out)]
+               "-map", "[out]", "-ar", str(SR), "-c:a", "flac",
+               "-flush_packets", "1",  # scrive subito su disco: la console può trascrivere in tempo reale
+               str(self.out)]
         self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                      stderr=subprocess.PIPE)
 

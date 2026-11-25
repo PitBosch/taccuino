@@ -5,7 +5,7 @@ Profili ASR (Whisper via OpenVINO):
   - "npu" : Intel Core Ultra con NPU: la trascrizione non occupa la GPU
   - "cpu" : fallback
 La diarization gira sempre su CPU (sherpa-onnx, leggera).
-I riassunti li scrive Claude Code (`claude -p`).
+I riassunti li scrive Claude Code (`claude -p`), sempre con Haiku.
 """
 from __future__ import annotations
 
@@ -66,7 +66,6 @@ class Settings:
     # --- Claude Code ---
     summarize: bool = True
     claude_bin: str = field(default_factory=lambda: shutil.which("claude") or str(Path.home() / ".local/bin/claude"))
-    claude_model: str | None = "haiku"  # modello Claude Code per le note
     claude_extra_prompt: str = ""    # istruzioni aggiuntive (es. "usa sempre l'inglese")
 
     keep_audio_days: int = 14  # 0 = cancella l'audio dopo l'elaborazione

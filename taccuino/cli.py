@@ -1,5 +1,9 @@
 """taccuino — registra, diarizza e trascrive le riunioni in locale (Intel GPU/NPU); le note le scrive Claude Code.
 
+  taccuino                        console interattiva (riassumi ultimi 5 min, domande, note…)
+  taccuino riassumi [MIN]         riassume gli ultimi MIN minuti (default 5) della riunione
+  taccuino chiedi "domanda"       domanda a Claude sulla riunione in corso (o l'ultima)
+  taccuino sottotitoli            finestrina sempre in primo piano con la trascrizione live
   taccuino daemon                 avvia il servizio sempre attivo (di solito via systemd)
   taccuino install-service        installa e avvia il servizio systemd utente
   taccuino status                 stato del daemon e app che usano il microfono
@@ -66,9 +70,13 @@ def _send(cmd: str):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="taccuino", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--profile", help="xe | npu | cpu")
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub = ap.add_subparsers(dest="cmd")
     for c in ("daemon", "install-service", "status", "stop", "list", "devices", "download"):
         sub.add_parser(c)
+    sub.add_parser("console").add_argument("--plain", action="store_true", help="console semplice, senza TUI")
+    sub.add_parser("riassumi").add_argument("minutes", nargs="?", default="5")
+    sub.add_parser("chiedi").add_argument("question", nargs="+")
+    sub.add_parser("sottotitoli")
     sub.add_parser("start").add_argument("title", nargs="?", default="")
     sub.add_parser("note").add_argument("text", nargs="+")
     p = sub.add_parser("process"); p.add_argument("path"); p.add_argument("--title", default="")
@@ -80,7 +88,26 @@ def main(argv=None):
         os.environ["TACCUINO_PROFILE"] = a.profile
     s = load_settings()
 
-    if a.cmd == "daemon":
+    if a.cmd in (None, "console"):
+        plain = getattr(a, "plain", False) or not (sys.stdin.isatty() and sys.stdout.isatty())
+        try:
+            if plain:
+                raise ImportError
+            from .tui import run
+        except ImportError:  # niente terminale (o prompt_toolkit mancante): console semplice
+            from .console import run
+        run()
+
+    elif a.cmd == "sottotitoli":
+        from .captions import run
+        run()
+
+    elif a.cmd in ("riassumi", "chiedi"):
+        from .console import Console
+        c = Console()
+        c.handle(f"r {a.minutes}") if a.cmd == "riassumi" else c.question(" ".join(a.question))
+
+    elif a.cmd == "daemon":
         from .daemon import run
         run()
 

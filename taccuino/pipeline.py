@@ -144,12 +144,13 @@ def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
     user_notes = (mdir / "notes.txt").read_text().strip() if (mdir / "notes.txt").exists() else ""
     transcript = transcript_text(lines)
 
-    title, notes = meta.get("title") or "", ""
+    title, notes, folder = meta.get("title") or "", "", meta.get("folder", "")
     if s.summarize and lines:
-        log("chiedo le note a Claude Code …")
+        log("chiedo le note a Claude Code (Haiku) …")
         try:
-            t_title, notes = summarize(s, transcript, user_notes, started, duration, meta.get("apps", []))
+            t_title, t_folder, notes = summarize(s, transcript, user_notes, started, duration, meta.get("apps", []))
             title = title or t_title
+            folder = folder or t_folder
         except Exception as e:  # noqa: BLE001
             log(f"Claude Code non disponibile: {e}")
             notes = f"> Note non generate: {e}\n> Rigenera con `taccuino summarize \"{mdir}\"`."
@@ -164,12 +165,12 @@ def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
         md += [notes.strip(), ""]
     md += ["---", "", "## Transcript", "", transcript or "_(nessun parlato rilevato)_", ""]
 
-    outdir = Path(s.output_dir)
+    outdir = Path(s.output_dir) / folder  # sottocartella scelta da Claude (vuota = radice)
     outdir.mkdir(parents=True, exist_ok=True)
     old = meta.get("output")
     out = Path(old) if old and Path(old).exists() else outdir / f"{started:%Y-%m-%d %H.%M} - {_slug(title)}.md"
     out.write_text("\n".join(md))
-    meta.update(title=title, output=str(out), processed=time.time(), duration=duration)
+    meta.update(title=title, folder=folder, output=str(out), processed=time.time(), duration=duration)
     (mdir / "meta.json").write_text(json.dumps(meta, indent=1))
     if s.keep_audio_days == 0:
         audio.unlink(missing_ok=True)
@@ -184,7 +185,7 @@ def resummarize(mdir: Path, s: Settings, log=print) -> Path:
     transcript = transcript_text(lines)
     user_notes = (mdir / "notes.txt").read_text().strip() if (mdir / "notes.txt").exists() else ""
     started = datetime.fromtimestamp(meta["started"])
-    title, notes = summarize(s, transcript, user_notes, started, meta.get("duration", 0), meta.get("apps", []))
+    _, _, notes = summarize(s, transcript, user_notes, started, meta.get("duration", 0), meta.get("apps", []))
     out = Path(meta["output"])
     body = out.read_text()
     head, _, tail = body.partition("\n---\n")

@@ -47,14 +47,22 @@ _LANG_NAMES = {"it": "Italian", "en": "English", "fr": "French", "de": "German",
 class ASR:
     """Whisper o Qwen3-ASR tramite openvino_genai.ASRPipeline (CPU/GPU/NPU)."""
 
-    def __init__(self, repo_id: str, device: str, language: str | None = None, vocabulary: str = ""):
+    def __init__(self, repo_id: str, device: str, language: str | None = None, vocabulary: str = "",
+                 quiet: bool = False):
         import openvino_genai as ov_genai
         t = time.time()
         path = ensure_whisper(repo_id)
         self.whisper = "whisper" in repo_id.lower()
-        self.pipe = (ov_genai.WhisperPipeline if self.whisper else ov_genai.ASRPipeline)(path, device)
+        cls = ov_genai.WhisperPipeline if self.whisper else ov_genai.ASRPipeline
+        cache = MODELS_DIR.parent / "ov_cache"  # kernel GPU compilati: il secondo avvio è molto più veloce
+        cache.mkdir(parents=True, exist_ok=True)
+        try:
+            self.pipe = cls(path, device, CACHE_DIR=str(cache))
+        except Exception:  # noqa: BLE001
+            self.pipe = cls(path, device)
         self.language, self.vocabulary = language, vocabulary
-        print(f"[taccuino] {repo_id.split('/')[-1]} su {device} pronto in {time.time() - t:.1f}s", flush=True)
+        if not quiet:
+            print(f"[taccuino] {repo_id.split('/')[-1]} su {device} pronto in {time.time() - t:.1f}s", flush=True)
 
     def transcribe(self, audio: np.ndarray) -> str:
         kw: dict = {}
