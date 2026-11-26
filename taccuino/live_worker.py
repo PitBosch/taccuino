@@ -97,6 +97,7 @@ class LiveNotes:
             try:
                 folder, why = choose_folder(self.s, new, user if user != "(nessuno)" else "")
                 self._update_meta(folder=folder, folder_reason=why)
+                self.lt.refresh_vocab()  # da ora Whisper usa il vocabolario di quella cartella
             except Exception as e:  # noqa: BLE001
                 print(f"scelta cartella: {e}", flush=True)  # ripiego: la sceglie la chiamata degli appunti
         rule = FOLDER_KEEP.format(folder=folder) if folder else FOLDER_FIRST.format(

@@ -157,14 +157,19 @@ def choose_folder(s: Settings, transcript: str, user_notes: str = "") -> tuple[s
 
 
 def summarize(s: Settings, transcript: str, user_notes: str, started: datetime, duration: float,
-              apps: list[str]) -> tuple[str, str, str]:
-    """Restituisce (titolo, cartella, note)."""
+              apps: list[str], folder: str = "") -> tuple[str, str, str]:
+    """Restituisce (titolo, cartella, note). `folder`: cartella già scelta, da cui prendere il vocabolario."""
+    from . import vocab
     folders = existing_folders(Path(s.output_dir), s.exclude_folders)
+    glossary = vocab.load(s, folder)[0]
+    extra = "\n".join(x for x in (s.claude_extra_prompt,
+                                  f"Vocabolario del progetto (scrivi nomi e termini esattamente così, "
+                                  f"anche nei partecipanti):\n{glossary}" if glossary else "") if x)
     prompt = PROMPT.format(
         date=started.strftime("%d/%m/%Y %H:%M"), duration=round(duration / 60),
         apps=", ".join(apps) or "-", notes=user_notes or "(nessuno)",
         folders=", ".join(f'"{f}"' for f in folders) or "(nessuna, è la prima)",
-        extra=(s.claude_extra_prompt + "\n") if s.claude_extra_prompt else "")
+        extra=extra + "\n" if extra else "")
     out = run_claude(s, prompt + transcript)
     title = folder = ""
     lines = out.split("\n")

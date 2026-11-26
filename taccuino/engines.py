@@ -104,6 +104,8 @@ class ASR:
         res = self.pipe.generate(audio.astype(np.float32).tolist(), **kw)
         text = res.texts[0].strip() if res.texts else ""
         text = re.sub(r"^language \w+<asr_text>", "", text).strip()  # prefisso Qwen3-ASR
+        if self.vocabulary and len(text.split()) >= 3 and text.lower().strip(" .,") in self.vocabulary.lower():
+            return ""  # su silenzio/rumore Whisper può ripetere il prompt (l'elenco di termini)
         return "" if _HALLU.match(text) else text
 
 

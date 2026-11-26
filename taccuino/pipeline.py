@@ -91,7 +91,8 @@ def transcribe_recording(audio_path: Path, s: Settings, log=print) -> tuple[list
     if not plans:
         return [], duration
 
-    asr = ASR(*s.asr, language=s.language, vocabulary=s.vocabulary)
+    from . import vocab
+    asr = ASR(*s.asr, language=s.language, vocabulary=vocab.load(s)[1])
     lines: dict[str, list[Line]] = {}
     t = time.time()
     for name, plan in plans.items():
@@ -184,7 +185,8 @@ def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
     if s.summarize and lines:
         log("chiedo le note a Claude Code (Haiku) …")
         try:
-            t_title, t_folder, notes = summarize(s, transcript, user_notes, started, duration, meta.get("apps", []))
+            t_title, t_folder, notes = summarize(s, transcript, user_notes, started, duration, meta.get("apps", []),
+                                                 folder)
             title = t_title or title  # il titolo scritto da Haiku sul contenuto vince su quello provvisorio/manuale
             folder = folder or t_folder
         except Exception as e:  # noqa: BLE001
@@ -236,7 +238,8 @@ def resummarize(mdir: Path, s: Settings, log=print) -> Path:
     transcript = transcript_text(lines)
     user_notes = user_notes_of(mdir)
     started = datetime.fromtimestamp(meta["started"])
-    _, _, notes = summarize(s, transcript, user_notes, started, meta.get("duration", 0), meta.get("apps", []))
+    _, _, notes = summarize(s, transcript, user_notes, started, meta.get("duration", 0), meta.get("apps", []),
+                            meta.get("folder", ""))
     out = Path(meta["output"])
     body = out.read_text()
     head, _, tail = body.partition("\n---\n")

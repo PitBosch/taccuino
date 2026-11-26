@@ -174,10 +174,27 @@ class LiveTranscript:
         except (FileNotFoundError, ValueError):
             return 0.0
 
+    def vocab(self) -> tuple[str, str]:
+        """Vocabolari della cartella scelta per questa riunione (tutti, finché la cartella non è decisa)."""
+        from . import vocab
+        try:
+            folder = json.loads((self.mdir / "meta.json").read_text()).get("folder", "")
+        except (OSError, ValueError):
+            folder = ""
+        return vocab.load(self.s, folder)
+
+    def refresh_vocab(self) -> str:
+        """Aggiorna il prompt di Whisper (la cartella può essere stata scelta nel frattempo); restituisce il testo per Haiku."""
+        full, prompt = self.vocab()
+        if self.asr is not None:
+            self.asr.vocabulary = prompt
+        return full
+
     def load(self, log=lambda _: None):
         if self.asr is None:
             from .engines import ASR
-            self.asr = ASR(*self.s.asr, language=self.s.language, vocabulary=self.s.vocabulary, quiet=True)
+            self.asr = ASR(*self.s.asr, language=self.s.language, quiet=True)
+            self.refresh_vocab()
 
     # ---------- trascrizione ----------
     def _commit(self, x: np.ndarray, start: float, pause: bool = False) -> list[Line]:
@@ -315,7 +332,7 @@ Per ogni riga NUOVA: correggi parole trascritte male (usa il contesto e il vocab
 maiuscole e ripetizioni accidentali. NON riassumere, NON aggiungere contenuti, NON fondere o spezzare righe.
 Se una riga è chiaramente un'allucinazione su rumore/silenzio (es. "Grazie." isolato, "Sottotitoli a cura di…")
 o è un pezzo senza senso, restituiscila vuota.
-Vocabolario (nomi e termini ricorrenti): {vocab}
+Vocabolario (nomi e termini ricorrenti; "trascritto anche come" elenca gli errori tipici di Whisper): {vocab}
 
 Rispondi SOLO con le righe nuove corrette, una per riga, nel formato `N|testo` (stesso N dell'input).
 Non usare strumenti.
@@ -377,7 +394,7 @@ class Cleaner:
         new = "\n".join(f"{i}|{lines[i].speaker}: {lines[i].text}" for i in todo)
         fixed = {i: lines[i].text for i in todo}
         try:
-            out = run_claude(self.lt.s, CLEAN_PROMPT.format(vocab=self.lt.s.vocabulary or "-", ctx=ctx, new=new),
+            out = run_claude(self.lt.s, CLEAN_PROMPT.format(vocab=self.lt.refresh_vocab() or "-", ctx=ctx, new=new),
                              timeout=90)
             for row in out.splitlines():
                 m = re.match(r"^\s*(\d+)\s*\|\s*(.*)$", row)
