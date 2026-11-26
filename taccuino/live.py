@@ -5,8 +5,9 @@ Il daemon non trascrive nulla durante la call (costo zero). Mentre la console è
      alla prima pausa (o dopo 20 s) la frase viene **fissata** in `live.jsonl`.
   2. `Cleaner`: nelle pause Claude Haiku corregge le frasi fissate (parole sbagliate, punteggiatura,
      allucinazioni tipo "Grazie." sul rumore) → `live.clean.json`. Riassunti e domande usano il testo corretto.
-Niente diarization qui: le righe sono "Io" (microfono) e "Call" (audio di sistema). Il transcript completo
-con gli speaker separati arriva comunque a fine riunione.
+Niente diarization completa qui: le righe sono "Io" (microfono) e "Call" (audio di sistema); con `live_speakers`
+le righe "Call" diventano "Call A", "Call B", … con un embedding vocale leggero (vedi `speakers.py`) e Haiku, nella
+stessa chiamata di correzione, dà loro un nome quando il testo lo rende chiaro (`live.names.json`).
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from .audio import SR
 from .compat import NO_WINDOW, try_lock
 from .config import Settings
 from .pipeline import Line, _dedupe_echo
+from .speakers import is_call
 from .vocab import prompt_text as vocab_prompt
 
 FRAME = 480          # 30 ms
@@ -115,7 +117,10 @@ class LiveTranscript:
         self.cursor_path = self.mdir / "live.cursor"
         self.clean_path = self.mdir / "live.clean.json"
         self.draft_path = self.mdir / "live.draft"
+        self.names_path = self.mdir / "live.names.json"
         self.asr = None
+        self.voices = None  # CallSpeakers, creato alla prima riga "Call" (solo nel processo che trascrive)
+        self.log = lambda m: print(m, flush=True)
         self.driving = False  # True se questo processo ha il turno di trascrizione (lock)
         self._draft, self._draft_len = "", 0
 
@@ -168,14 +173,27 @@ class LiveTranscript:
         except (FileNotFoundError, ValueError):
             return {}
 
+    def names(self) -> dict[str, str]:
+        """Nomi dati da Haiku alle voci della call ("Call A" → nome); vuoto per le riunioni vecchie."""
+        try:
+            data = json.loads(self.names_path.read_text(encoding="utf-8"))
+            return {str(k): str(v) for k, v in data.items() if v} if isinstance(data, dict) else {}
+        except (FileNotFoundError, ValueError):
+            return {}
+
+    def who(self, speaker: str, names: dict[str, str] | None = None) -> str:
+        """Come mostrare uno speaker: il nome se Haiku l'ha capito, altrimenti l'etichetta ("Io", "Call A", …)."""
+        return (self.names() if names is None else names).get(speaker, speaker)
+
     def clean_lines(self) -> list[Line]:
-        """Righe con la correzione di Haiku dove c'è già (le righe svuotate da Haiku spariscono)."""
-        fixed = self.cleaned()
+        """Righe con la correzione di Haiku dove c'è già (le righe svuotate da Haiku spariscono) e i nomi delle
+        voci della call al posto delle etichette, se noti."""
+        fixed, names = self.cleaned(), self.names()
         out = []
         for i, l in enumerate(self.lines()):
             t = fixed.get(i, l.text)
             if t:
-                out.append(Line(l.start, l.end, l.speaker, t))
+                out.append(Line(l.start, l.end, names.get(l.speaker, l.speaker), t))
         return out
 
     @property
@@ -207,7 +225,7 @@ class LiveTranscript:
         """Trascrive x (fissato), lo aggiunge a live.jsonl e sposta il cursore.
         pause=True: il blocco finisce in una pausa, quindi la bozza (se lo copre) è già il testo giusto."""
         if len(x) / SR <= MAX_SEG:
-            return self._write(self._short(x, start, pause), start + len(x) / SR)
+            return self._write(self._short(x, start, pause), start + len(x) / SR, x, start)
         per_ch: list[list[Line]] = []
         for c in range(2):
             ch = x[:, c]
@@ -219,7 +237,7 @@ class LiveTranscript:
                     rows.append(Line(round(start + a, 1), round(start + b, 1), LABELS[c], text))
             per_ch.append(rows)
         return self._write(sorted(_dedupe_echo(per_ch[0], per_ch[1]) + per_ch[1], key=lambda l: l.start),
-                           start + len(x) / SR)
+                           start + len(x) / SR, x, start)
 
     def _short(self, x: np.ndarray, start: float, pause: bool = False) -> list[Line]:
         """Blocco dello streaming (≤ 25 s): di norma UNA sola chiamata a Whisper, riusando la bozza se la copre.
@@ -253,7 +271,27 @@ class LiveTranscript:
         """Testi delle ultime righe fissate (per riconoscere le ripetizioni di Whisper)."""
         return [l.text for l in self.lines()[-4:] if now - l.end < window]
 
-    def _write(self, new: list[Line], cursor: float) -> list[Line]:
+    def _label_calls(self, new: list[Line], x: np.ndarray, start: float) -> list[Line]:
+        """Righe "Call" → "Call A", "Call B", … dall'embedding della voce (solo il canale di sistema della riga)."""
+        if not self.s.live_speakers or not any(l.speaker == "Call" for l in new):
+            return new
+        if self.voices is None:
+            from .speakers import CallSpeakers
+            self.voices = CallSpeakers(self.mdir, self.s.speaker_threshold, log=self.log)
+        out = []
+        for l in new:
+            if l.speaker == "Call":
+                ch = x[int(max(0.0, l.start - start) * SR): int(max(0.0, l.end - start) * SR), 1]
+                try:
+                    l = Line(l.start, l.end, self.voices.label(ch, _speech(ch), FRAME, SR), l.text)
+                except Exception as e:  # noqa: BLE001  # mai perdere una riga per colpa delle voci
+                    self.log(f"voci della call: {e}")
+            out.append(l)
+        return out
+
+    def _write(self, new: list[Line], cursor: float, x: np.ndarray | None = None, start: float = 0.0) -> list[Line]:
+        if x is not None:
+            new = self._label_calls(new, x, start)
         with open(self.path, "a") as f:
             for l in new:
                 f.write(json.dumps(l.__dict__, ensure_ascii=False) + "\n")
@@ -343,13 +381,20 @@ o è un pezzo senza senso, restituiscila vuota.
 Vocabolario (nomi e termini ricorrenti; "trascritto anche come" elenca gli errori tipici di Whisper): {vocab}
 
 Rispondi SOLO con le righe nuove corrette, una per riga, nel formato `N|testo` (stesso N dell'input).
-Non usare strumenti.
+{names_rule}Non usare strumenti.
 
 CONTESTO GIÀ CORRETTO (non modificarlo):
 {ctx}
 
 RIGHE NUOVE:
 {new}
+"""
+
+# Aggiunta al prompt solo se tra le righe ci sono voci della call ("Call A", "Call B", …): niente chiamate in più.
+NAMES_RULE = """"Io" è l'utente; "Call A", "Call B", … sono voci diverse dei partecipanti remoti (riconosciute
+dal suono, possono sbagliare). Se il testo rende CHIARO il nome di una di queste voci (si presenta, oppure qualcuno
+la chiama per nome e lei risponde), aggiungi in fondo una riga `NOME|Call X|Nome`. Solo con un'evidenza esplicita nel
+testo: mai indovinare; nel dubbio non scrivere nulla. Nomi già noti: {known}.
 """
 
 
@@ -401,17 +446,44 @@ class Cleaner:
         ctx = "\n".join(f"{lines[i].speaker}: {done[i]}" for i in ctx_idx if done[i]) or "(inizio)"
         new = "\n".join(f"{i}|{lines[i].speaker}: {lines[i].text}" for i in todo)
         fixed = {i: lines[i].text for i in todo}
+        voices = {l.speaker for l in lines if is_call(l.speaker) and l.speaker != "Call"}
+        names = self.lt.names()
+        rule = NAMES_RULE.format(known=", ".join(f"{k} = {v}" for k, v in sorted(names.items())) or "nessuno") \
+            if voices else ""
         try:
-            out = run_claude(self.lt.s, CLEAN_PROMPT.format(vocab=self.lt.refresh_vocab() or "-", ctx=ctx, new=new),
-                             timeout=90)
+            out = run_claude(self.lt.s, CLEAN_PROMPT.format(vocab=self.lt.refresh_vocab() or "-", ctx=ctx, new=new,
+                                                            names_rule=rule), timeout=90)
             for row in out.splitlines():
                 m = re.match(r"^\s*(\d+)\s*\|\s*(.*)$", row)
                 if m and int(m.group(1)) in fixed:
-                    t = re.sub(r"^(Io|Call)\s*:\s*", "", m.group(2)).strip()
+                    t = re.sub(r"^(Io|Call(?: [A-Z])?)\s*:\s*", "", m.group(2)).strip()
                     fixed[int(m.group(1))] = t
+            found = parse_names(out, voices)
+            if found and {**names, **found} != names:
+                names.update(found)
+                self.lt.names_path.write_text(json.dumps(names, ensure_ascii=False, indent=1), encoding="utf-8")
         except Exception:  # noqa: BLE001
             pass
         cur = self.lt.cleaned()
         cur.update(fixed)
         self.lt.clean_path.write_text(json.dumps(cur, ensure_ascii=False))
         return todo
+
+
+_NO_NAME = re.compile(r"^(\?+|-+|n/?a|nessuno|sconosciut[oa]|ignoto|non (so|noto|chiaro).*|call( [a-z])?|io)$", re.I)
+
+
+def parse_names(out: str, voices: set[str]) -> dict[str, str]:
+    """Righe `NOME|Call X|Nome` della risposta di Haiku → {"Call X": "Nome"}, solo per voci esistenti e nomi
+    plausibili (niente "?", "sconosciuto", frasi)."""
+    found: dict[str, str] = {}
+    for row in out.splitlines():
+        m = re.match(r"^\W*NOME\W*\|\s*(Call [A-Z])\s*\|\s*(.+?)\s*$", row, re.I)
+        if not m:
+            continue
+        label = "Call " + m.group(1)[-1].upper()
+        name = m.group(2).strip().strip('"*`.,;:')
+        if label in voices and name and not _NO_NAME.match(name) and len(name) <= 40 and len(name.split()) <= 4 \
+                and not re.search(r"[|:\d]", name):
+            found[label] = name
+    return found

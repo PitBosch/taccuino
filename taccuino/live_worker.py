@@ -20,7 +20,8 @@ from .config import load_settings
 from .live import Cleaner, LiveTranscript
 from .pipeline import fmt_ts
 
-NOTES_PROMPT = """Stai seguendo in diretta una riunione dell'utente ("Io"; "Call" = partecipanti remoti).
+NOTES_PROMPT = """Stai seguendo in diretta una riunione dell'utente ("Io"; "Call", "Call A", "Call B", … o un nome =
+partecipanti remoti; le voci "Call X" sono riconosciute dal suono e possono sbagliare).
 Ogni pochi minuti ricevi il transcript nuovo (automatico, già ripulito, può avere errori) e prendi appunti.
 
 Scrivi SOLO appunti nuovi, mirati e precisi, che all'utente servirà ritrovare: decisioni, impegni e cose da fare
