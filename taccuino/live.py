@@ -132,7 +132,9 @@ class LiveTranscript:
         """True se un ALTRO processo sta trascrivendo (heartbeat recente)."""
         try:
             pid, ts = (self.mdir / "live.driver").read_text().split()
-            return int(pid) != os.getpid() and time.time() - float(ts) < 5
+            # 30 s: un passo del worker (trascrizione di un blocco, o il caricamento del modello) può durare più
+            # di 5 s senza heartbeat; con soglia bassa console e sottotitoli caricavano un secondo Whisper (~2 GB)
+            return int(pid) != os.getpid() and time.time() - float(ts) < 30
         except (FileNotFoundError, ValueError):
             return False
 
