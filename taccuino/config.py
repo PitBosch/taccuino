@@ -100,6 +100,10 @@ class Settings:
 
     keep_audio_days: int = 14  # 0 = cancella l'audio dopo l'elaborazione
 
+    # --- più riunioni nella stessa registrazione (call di fila, microfono mai rilasciato) ---
+    auto_split: bool = True        # a fine registrazione Haiku controlla se contiene più riunioni e le divide
+    split_min_minutes: float = 40.0  # sotto questa durata non controlla (costa una chiamata a Haiku)
+
     # --- trascrizione ---
     asr_model: str | None = None  # override del modello del profilo (repo Hugging Face OpenVINO)
     vocabulary: str = ""  # termini scritti a mano; si sommano a quelli presi dal vault Obsidian

@@ -156,6 +156,13 @@ class Daemon:
                 self.start(True, arg)
         elif verb == "stop":
             self.stop("(manuale)")
+        elif verb == "split":  # call di fila: chiude questa registrazione e ne apre subito un'altra
+            if self.meeting:
+                manual, apps = self.meeting.manual, self.meeting.apps
+                self.stop("(divisa)")
+                self.start(manual, arg, apps)
+            else:
+                self.start(True, arg)
         elif verb == "quit":  # usato da `taccuino quit` / uninstall-service (su Windows non c'è SIGTERM)
             log("arresto richiesto")
             self.running = False

@@ -156,6 +156,8 @@ def _duration(path: Path) -> float:
 
 def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
     """Elabora una cartella riunione (audio.flac, meta.json, notes.txt) e scrive il Markdown."""
+    from .split import maybe_split
+    parts = maybe_split(mdir, s, log) if s.summarize else []  # call di fila nella stessa registrazione → una nota ciascuna
     meta = json.loads((mdir / "meta.json").read_text()) if (mdir / "meta.json").exists() else {}
     audio = mdir / "audio.flac"
     if not s.final_transcribe and (mdir / "live.jsonl").exists():
@@ -199,6 +201,8 @@ def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
           f"{', '.join(sorted({l.speaker for l in lines})) or 'nessun parlato'}*", ""]
     if reason:
         md += [f"*Cartella `{folder or '/'}`: {reason}*", ""]
+    if meta.get("split_reason"):
+        md += [f"*Registrazione divisa in più riunioni: {meta['split_reason']}*", ""]
     if user_notes:
         md += ["## I miei appunti", "", user_notes, ""]
     if notes:
@@ -228,6 +232,8 @@ def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
     if s.keep_audio_days == 0:
         audio.unlink(missing_ok=True)
     log(f"scritto {out}")
+    for part in parts:  # le altre riunioni della stessa registrazione
+        process_meeting(part, s, log)
     return out
 
 

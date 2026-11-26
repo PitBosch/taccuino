@@ -45,7 +45,7 @@ def _fmt(l: Line) -> str:
 
 # comandi accettati anche con lo slash (/riassumi, /nota …)
 SLASH_ALIASES = {"riassumi", "r", "riassunto", "trascrizione", "t", "transcript", "nota", "n", "start", "stop",
-                 "live", "stato", "s", "status", "help", "aiuto", "h", "esci", "q", "exit", "quit", "jira"}
+                 "split", "live", "stato", "s", "status", "help", "aiuto", "h", "esci", "q", "exit", "quit", "jira"}
 
 
 class Console:
@@ -308,6 +308,8 @@ class Console:
             _send(f"start {arg}".strip()); self.info("● registrazione avviata")
         elif v == "stop":
             _send("stop"); self.info("■ registrazione fermata: transcript completo e note tra qualche minuto")
+        elif v == "split":
+            _send(f"split {arg}".strip()); self.info("✂ registrazione divisa: la nuova riunione comincia adesso")
         elif v == "live":
             self.show_live = not self.show_live
             self.info(f"righe live {'visibili' if self.show_live else 'nascoste'}")

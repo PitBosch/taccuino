@@ -11,6 +11,8 @@
   taccuino status                 stato del daemon e app che usano il microfono
   taccuino start ["titolo"]       avvia una registrazione manuale (es. riunione dal vivo)
   taccuino stop                   ferma la registrazione in corso
+  taccuino split [DIR [MM:SS]]    senza argomenti: chiude la riunione e ne apre un'altra (call di fila);
+                                  con DIR: divide una registrazione (all'istante MM:SS, o dove decide Haiku)
   taccuino note "testo"           appunto per il segretario (Haiku): nota + eventuale task Jira
   taccuino jira [ok N|no N]       proposte Jira del segretario
   taccuino vocabolario [--show]   Haiku compila il vocabolario (nomi, progetti, termini) dal vault Obsidian
@@ -37,6 +39,7 @@ from pathlib import Path
 
 from . import platforms
 from .platforms import IS_WIN
+from .split import parse_ts
 from .config import CONTROL_PATH, DATA_DIR, MEETINGS_DIR, STATE_PATH, load_settings, save_settings
 
 def _state():
@@ -85,6 +88,7 @@ def main(argv=None):
     sub.add_parser("live-worker").add_argument("dir")
     sub.add_parser("jira").add_argument("args", nargs="*")
     v = sub.add_parser("vocabolario"); v.add_argument("--vault", default=""); v.add_argument("--show", action="store_true")
+    sp = sub.add_parser("split"); sp.add_argument("dir", nargs="?"); sp.add_argument("at", nargs="?")
     sub.add_parser("start").add_argument("title", nargs="?", default="")
     sub.add_parser("note").add_argument("text", nargs="+")
     p = sub.add_parser("process"); p.add_argument("path"); p.add_argument("--title", default="")
@@ -174,6 +178,29 @@ def main(argv=None):
 
     elif a.cmd == "start":
         _send(f"start {a.title}".strip()); print("● registrazione avviata")
+    elif a.cmd == "split" and not a.dir:
+        _send("split"); print("✂ registrazione divisa: la nuova riunione comincia adesso")
+
+    elif a.cmd == "split":
+        from .pipeline import process_meeting
+        from .split import find_splits, split_meeting
+        from .live import LiveTranscript
+        mdir = Path(a.dir).expanduser()
+        if not mdir.is_absolute() and not mdir.exists():
+            mdir = MEETINGS_DIR / a.dir
+        if a.at:
+            cuts = [(parse_ts(a.at), "taglio manuale")]
+        else:
+            print("Claude cerca dove comincia la riunione successiva …")
+            cuts = find_splits(s, LiveTranscript(mdir, s).clean_lines())
+            if not cuts:
+                sys.exit("Haiku non vede più riunioni in questa registrazione. Indica tu il punto: taccuino split DIR MM:SS")
+        parts = []
+        for at, why in reversed(cuts):
+            parts.insert(0, split_meeting(mdir, at, why))
+        for d in (mdir, *parts):
+            print(process_meeting(d, s))
+
     elif a.cmd == "stop":
         _send("stop"); print("■ registrazione fermata, elaborazione in coda")
 

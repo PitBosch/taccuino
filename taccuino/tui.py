@@ -36,6 +36,7 @@ COMMANDS = [
     ("/jira", "[ok N|no N]", "proposte Jira del segretario: crea o scarta"),
     ("/start", "[titolo]", "avvia una registrazione manuale"),
     ("/stop", "", "ferma la registrazione"),
+    ("/split", "[titolo]", "chiude la riunione e ne apre subito un'altra (call di fila)"),
     ("/live", "", "mostra/nasconde la trascrizione live"),
     ("/stato", "", "stato del daemon"),
     ("/help", "", "elenco dei comandi"),
@@ -49,6 +50,7 @@ HELP = """Comandi (anche senza slash: r, t, n, s, h, q)
                       "n crea task: …" crea subito un task sul tuo Jira; altrimenti lo propone
   /jira [ok N|no N]   proposte Jira: elenco · crea · scarta           jira ok 1
   /start [titolo]     registrazione manuale · /stop la ferma
+  /split [titolo]     call di fila: chiude questa riunione e ne apre subito un'altra
   /live               mostra/nasconde la trascrizione live
   /stato · /help · /esci
 Qualsiasi altra frase è una domanda a Claude Haiku sulla riunione (in corso o l'ultima).
