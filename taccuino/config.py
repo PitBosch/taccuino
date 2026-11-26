@@ -30,6 +30,16 @@ ASR_PROFILES = {
     "cpu": ("OpenVINO/whisper-small-int8-ov", "CPU"),
 }
 
+# Modelli Whisper OpenVINO scelti da `taccuino setup --model` (repo reali su Hugging Face). Dal più preciso al più leggero.
+# La RAM non è stata misurata per tutti: solo turbo-int8 (≈ 1-2 GB con il modello caricato).
+ASR_MODELS = {
+    "turbo-int8": "OpenVINO/whisper-large-v3-turbo-int8-ov",
+    "turbo-int4": "OpenVINO/whisper-large-v3-turbo-int4-ov",
+    "small-int8": "OpenVINO/whisper-small-int8-ov",
+    "small-int4": "OpenVINO/whisper-small-int4-ov",
+    "base-int8": "OpenVINO/whisper-base-int8-ov",
+}
+
 SEGMENTATION_URL = ("https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/"
                     "sherpa-onnx-pyannote-segmentation-3-0.tar.bz2")
 EMBEDDING_URL = ("https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"

@@ -51,5 +51,34 @@ class ProjectVocab(unittest.TestCase):
         self.assertNotIn("Zeta", vocab.prompt_text(self.s, 40, None))
 
 
+class FindVault(unittest.TestCase):
+    """Regressione: `Desktop` con un .obsidian dentro e il vero vault annidato; note nel .venv non contano."""
+
+    def test_vault_annidato_e_ambienti_virtuali(self):
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            (home / "Desktop" / ".obsidian").mkdir(parents=True)
+            (home / "Desktop" / "KB" / ".obsidian").mkdir(parents=True)
+            (home / "Desktop" / "KB" / "nota.md").write_text("x")
+            (home / "Desktop" / "repo" / ".venv" / "Lib" / "site-packages").mkdir(parents=True)
+            for i in range(50):
+                (home / "Desktop" / "repo" / ".venv" / "Lib" / "site-packages" / f"{i}.md").write_text("x")
+            s = Settings(output_dir=str(home / "Documenti" / "Taccuino"))
+            with mock.patch.object(vocab.Path, "home", return_value=home):
+                self.assertEqual(vocab.find_vault(s), home / "Desktop" / "KB")
+                self.assertEqual([p.name for p in vocab._notes(home / "Desktop")], ["nota.md"])
+
+    def test_se_le_note_sono_gia_in_un_vault_e_quello(self):
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            for v in ("A", "B"):
+                (home / "Desktop" / v / ".obsidian").mkdir(parents=True)
+            (home / "Desktop" / "A" / "1.md").write_text("x")  # A ha più note, ma le note di Taccuino vanno in B
+            (home / "Desktop" / "A" / "2.md").write_text("x")
+            s = Settings(output_dir=str(home / "Desktop" / "B"))
+            with mock.patch.object(vocab.Path, "home", return_value=home):
+                self.assertEqual(vocab.find_vault(s), home / "Desktop" / "B")
+
+
 if __name__ == "__main__":
     unittest.main()

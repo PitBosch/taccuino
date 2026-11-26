@@ -18,7 +18,7 @@ import os
 import re
 import time
 from collections import Counter, defaultdict
-from itertools import zip_longest
+from itertools import islice, zip_longest
 from pathlib import Path
 
 from .config import DATA_DIR, Settings
@@ -27,6 +27,7 @@ VOCAB_PATH = DATA_DIR / "vocabulary.txt"
 META_PATH = DATA_DIR / "vocabulary.json"
 
 _SKIP_DIRS = {".obsidian", ".trash", ".git", "node_modules", "templates", "Templates"}
+_NOT_NOTES = {".venv", "venv", "env", "site-packages", "__pycache__", "AppData", "dist-packages"}
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}[ _-]*")
 _WIKI = re.compile(r"\[\[([^\]|#^]+)(?:[#^][^\]|]*)?(?:\|([^\]]+))?\]\]")
 _TAG = re.compile(r"(?<![\w/#])#([A-Za-zÀ-ÿ][\w/-]{1,40})")
@@ -51,17 +52,26 @@ def find_vault(s: Settings) -> Path | None:
             continue
         for depth in ("*/.obsidian", "*/*/.obsidian", ".obsidian"):
             for o in r.glob(depth):
-                if o.is_dir() and not any(x in o.parts for x in (".cache", "node_modules", "AppData")):
+                if o.is_dir() and not any(x in o.relative_to(r).parts for x in (".cache", "node_modules", "AppData")):
                     found.add(o.parent)
     if not found:
         return None
-    return max(found, key=lambda v: sum(1 for _ in v.rglob("*.md")))
+    # un vault dentro un altro (es. la cartella Desktop con dentro il vero vault) → vale quello più interno
+    found = {v for v in found if not any(v != w and v in w.parents for w in found)}
+    out = Path(s.output_dir).expanduser()  # se le note vanno già in un vault, è quello
+    for v in found:
+        if v == out or v in out.parents:
+            return v
+    return max(found, key=lambda v: sum(1 for _ in islice(_notes(v), 2000)))  # conteggio limitato: niente scansioni infinite
 
 
 def _notes(vault: Path):
-    for p in vault.rglob("*.md"):
-        if not any(part in _SKIP_DIRS for part in p.relative_to(vault).parts):
-            yield p
+    """Note .md del vault, senza cartelle nascoste, ambienti virtuali e dipendenze."""
+    for dirpath, dirs, files in os.walk(vault):
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and d not in _NOT_NOTES and not d.startswith(".")]
+        for f in files:
+            if f.endswith(".md"):
+                yield Path(dirpath) / f
 
 
 def candidates(vault: Path, limit: int = 1200) -> list[tuple[str, int]]:

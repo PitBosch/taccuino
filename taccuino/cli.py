@@ -18,6 +18,8 @@
   taccuino summarize DIR          rigenera solo le note di Claude
   taccuino list                   ultime riunioni elaborate
   taccuino devices                device OpenVINO e sorgenti audio
+  taccuino doctor                 controlla requisiti e configurazione (sola lettura)
+  taccuino setup [--yes …]        configura profilo e modello in base alla macchina (vedi --help)
   taccuino download               scarica i modelli (Whisper + diarization)
   taccuino config [KEY [VALUE]]   mostra/modifica le impostazioni
 """
@@ -68,6 +70,14 @@ def main(argv=None):
     for c in ("daemon", "install-service", "uninstall-service", "quit", "status", "stop", "list", "devices",
               "download"):
         sub.add_parser(c)
+    sub.add_parser("doctor")
+    st = sub.add_parser("setup")
+    st.add_argument("--yes", action="store_true", help="applica senza chiedere (necessario senza terminale)")
+    st.add_argument("--output-dir", default="", help="cartella dove scrivere le note")
+    st.add_argument("--model", default="", help="turbo-int8 | turbo-int4 | small-int8 | small-int4 | base-int8")
+    st.add_argument("--download", action="store_true", help="scarica il modello Whisper")
+    st.add_argument("--with-diarization", action="store_true", help="con --download: scarica anche la diarization")
+    st.add_argument("--service", action="store_true", help="installa il servizio all'accesso")
     sub.add_parser("console").add_argument("--plain", action="store_true", help="console semplice, senza TUI")
     sub.add_parser("riassumi").add_argument("minutes", nargs="?", default="5")
     sub.add_parser("chiedi").add_argument("question", nargs="+")
@@ -98,6 +108,14 @@ def main(argv=None):
         except ImportError:  # niente terminale (o prompt_toolkit mancante): console semplice
             from .console import run
         run()
+
+    elif a.cmd == "doctor":
+        from .setup_wizard import doctor
+        sys.exit(1 if doctor() else 0)
+
+    elif a.cmd == "setup":
+        from .setup_wizard import setup
+        setup(a.yes, a.output_dir, a.model, a.profile or "", a.download, a.service, a.with_diarization)
 
     elif a.cmd == "vocabolario":
         from .vocab import VOCAB_PATH, build, terms
