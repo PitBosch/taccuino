@@ -76,15 +76,19 @@ RECAP = ("Riassumi in 3-6 punti cosa si è detto; poi, solo se ci sono, decision
          "(chi/cosa). Se il transcript è quasi vuoto o incomprensibile, dillo in una riga.")
 
 
-def run_claude(s: Settings, prompt: str, timeout: int = 900, allow_tools: list[str] | None = None) -> str:
-    """`claude -p` con Haiku. allow_tools: strumenti (es. di un connettore MCP) pre-approvati per questa chiamata."""
+def run_claude(s: Settings, prompt: str, timeout: int = 900, allow_tools: list[str] | None = None,
+               read_dir: Path | None = None) -> str:
+    """`claude -p` con Haiku. allow_tools: strumenti (es. di un connettore MCP) pre-approvati per questa chiamata.
+    read_dir: Claude può solo leggere (Read/Glob/Grep) dentro questa cartella, che diventa la sua cartella di lavoro."""
     cmd = command(s.claude_bin, "-p", "--output-format", "text", "--no-session-persistence",
                   "--disallowedTools", "Bash", "Edit", "Write", "WebFetch", "WebSearch", "NotebookEdit")
-    if allow_tools:
+    if read_dir:
+        cmd += ["--tools", "Read", "Glob", "Grep", "--allowedTools", "Read", "Glob", "Grep"]
+    elif allow_tools:
         cmd += ["--allowedTools", *allow_tools]
     cmd += ["--model", CLAUDE_MODEL]
     res = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8",
-                         timeout=timeout, cwd=tempfile.gettempdir(), **NO_WINDOW)
+                         timeout=timeout, cwd=str(read_dir) if read_dir else tempfile.gettempdir(), **NO_WINDOW)
     if res.returncode != 0 or not res.stdout.strip():
         raise RuntimeError((res.stderr or res.stdout or f"exit {res.returncode}").strip()[-400:])
     return res.stdout.strip()
@@ -116,6 +120,40 @@ def clean_folder(folder: str) -> str:
         if p:
             parts.append(p)
     return "/".join(parts[:2])
+
+
+FOLDER_PROMPT = """Devi scegliere la sottocartella dell'archivio (la tua cartella di lavoro) dove archiviare la nota
+di una riunione. Hai solo strumenti di lettura (Glob, Grep, Read): guarda cosa contengono le cartelle candidate
+(nomi dei file, un indice o README, le note più recenti) e apri al massimo 3-4 documenti, solo se servono a capire a
+quale progetto, cliente o tema appartiene la riunione (nomi, sigle e argomenti emersi nel transcript). Non leggere
+altro e non scrivere nulla.
+Scegli una cartella esistente se la riunione ci rientra; solo se nessuna va bene, proponine una nuova, breve e
+generica. Al massimo 2 livelli, separati da "/". Cartelle candidate: {folders}
+
+Rispondi SOLO con queste due righe:
+CARTELLA: <percorso>
+MOTIVO: <1-2 frasi: cosa hai trovato (cartelle o documenti consultati) e perché la riunione ci rientra>
+
+APPUNTI DELL'UTENTE:
+{user}
+
+TRANSCRIPT (automatico, può avere errori):
+{transcript}
+"""
+
+
+def choose_folder(s: Settings, transcript: str, user_notes: str = "") -> tuple[str, str]:
+    """Haiku guarda cosa c'è nell'archivio (sola lettura) e sceglie la sottocartella. Restituisce (cartella, motivo)."""
+    root = Path(s.output_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    folders = ", ".join(f'"{f}"' for f in existing_folders(root, s.exclude_folders)) or "(nessuna, è la prima)"
+    out = run_claude(s, FOLDER_PROMPT.format(folders=folders, user=user_notes or "(nessuno)",
+                                             transcript=transcript[-6000:]), timeout=180, read_dir=root)
+    m = re.search(r"^\W*CARTELLA\W*:\s*(.+)$", out, re.I | re.M)
+    if not m:
+        raise RuntimeError("risposta senza CARTELLA: " + out[:120])
+    why = re.search(r"^\W*MOTIVO\W*:\s*(.+(?:\n(?!\W*CARTELLA).+)*)", out, re.I | re.M)
+    return clean_folder(m.group(1).strip().strip('"*`')), (why.group(1).strip().replace("\n", " ") if why else "")
 
 
 def summarize(s: Settings, transcript: str, user_notes: str, started: datetime, duration: float,

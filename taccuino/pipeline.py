@@ -172,6 +172,14 @@ def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
     transcript = transcript_text(lines)
 
     title, notes, folder = meta.get("title") or "", "", meta.get("folder", "")
+    reason = meta.get("folder_reason", "")
+    if s.summarize and lines and not folder:
+        from .summarize import choose_folder
+        log("Claude guarda l'archivio per scegliere la cartella …")
+        try:
+            folder, reason = choose_folder(s, transcript, user_notes)
+        except Exception as e:  # noqa: BLE001
+            log(f"scelta cartella: {e}")  # ripiego: la propone il riassunto
     if s.summarize and lines:
         log("chiedo le note a Claude Code (Haiku) …")
         try:
@@ -186,6 +194,8 @@ def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
     md = [f"# {title}", "",
           f"*{started:%d/%m/%Y %H:%M} · {fmt_ts(duration)} · "
           f"{', '.join(sorted({l.speaker for l in lines})) or 'nessun parlato'}*", ""]
+    if reason:
+        md += [f"*Cartella `{folder or '/'}`: {reason}*", ""]
     if user_notes:
         md += ["## I miei appunti", "", user_notes, ""]
     if notes:
@@ -207,7 +217,8 @@ def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
     out.write_text("\n".join(md))
     if provisional and oldp != out:
         oldp.unlink()
-    meta.update(title=title, folder=folder, output=str(out), processed=time.time(), duration=duration)
+    meta.update(title=title, folder=folder, folder_reason=reason, output=str(out), processed=time.time(),
+                duration=duration)
     (mdir / "meta.json").write_text(json.dumps(meta, indent=1))
     if s.keep_audio_days == 0:
         audio.unlink(missing_ok=True)

@@ -79,7 +79,7 @@ class LiveNotes:
         return self.s.live_notes_minutes > 0 and time.time() - self.last >= self.s.live_notes_minutes * 60
 
     def run(self, final: bool = False):
-        from .summarize import clean_folder, existing_folders, run_claude
+        from .summarize import choose_folder, clean_folder, existing_folders, run_claude
         self.last = time.time()
         lines = [l for l in self.lt.clean_lines() if l.end > self.upto]
         words = sum(len(l.text.split()) for l in lines)
@@ -88,13 +88,19 @@ class LiveNotes:
         meta = self._meta()
         folder = meta.get("folder", "")
         root = Path(self.s.output_dir)
-        rule = FOLDER_KEEP.format(folder=folder) if folder else FOLDER_FIRST.format(
-            folders=", ".join(f'"{f}"' for f in existing_folders(root, self.s.exclude_folders)) or "(nessuna)")
         prev = self.path.read_text().strip() if self.path.exists() else "(nessuno)"
         from .pipeline import user_notes_of
         user = user_notes_of(self.mdir) or "(nessuno)"
         span = f"{fmt_ts(lines[0].start)}–{fmt_ts(lines[-1].end)}"
         new = "\n".join(f"[{fmt_ts(l.start)}] {l.speaker}: {l.text}" for l in lines)
+        if not folder:  # prima passata: Haiku guarda cosa c'è nell'archivio e sceglie (con motivo)
+            try:
+                folder, why = choose_folder(self.s, new, user if user != "(nessuno)" else "")
+                self._update_meta(folder=folder, folder_reason=why)
+            except Exception as e:  # noqa: BLE001
+                print(f"scelta cartella: {e}", flush=True)  # ripiego: la sceglie la chiamata degli appunti
+        rule = FOLDER_KEEP.format(folder=folder) if folder else FOLDER_FIRST.format(
+            folders=", ".join(f'"{f}"' for f in existing_folders(root, self.s.exclude_folders)) or "(nessuna)")
         try:
             out = run_claude(self.s, NOTES_PROMPT.format(folder_rule=rule, prev=prev[-4000:], user=user,
                                                          span=span, new=new), timeout=120)
@@ -129,7 +135,9 @@ class LiveNotes:
         out = old if old and old.parent == want else want / f"{started:%Y-%m-%d %H.%M} - {_slug(title or 'Riunione')}.md"
         out.parent.mkdir(parents=True, exist_ok=True)
         notes = self.path.read_text().strip() if self.path.exists() else "_(ancora nessun appunto)_"
-        out.write_text(f"# {title or 'Riunione'}\n\n*{started:%d/%m/%Y %H:%M} · in corso…*\n\n"
+        why = meta.get("folder_reason")
+        where = f"*Cartella `{folder or '/'}`: {why}*\n\n" if why else ""
+        out.write_text(f"# {title or 'Riunione'}\n\n*{started:%d/%m/%Y %H:%M} · in corso…*\n\n{where}"
                        f"## Appunti di Claude durante la riunione\n{notes}\n")
         if old != out:
             if old and old.exists():
