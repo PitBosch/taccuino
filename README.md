@@ -99,8 +99,9 @@ Prova:
 4. Log del daemon: `%LOCALAPPDATA%\taccuino\daemon.log`. Per fermarlo: `taccuino quit`;
    per toglierlo: `taccuino uninstall-service`.
 
-Limiti noti: non testato su Windows reale; se l'uscita audio predefinita cambia durante la call (es. cuffie
-Bluetooth collegate dopo), l'audio di sistema resta sul dispositivo vecchio fino alla registrazione successiva.
+Limiti noti: non testato su Windows reale; se l'uscita o il microfono predefiniti cambiano durante la call (es. cuffie
+collegate dopo), la cattura li riapre da sola entro ~5 s. Se Teams usa un dispositivo diverso dal predefinito di
+Windows, l'audio di sistema non viene registrato: allinea il dispositivo di Teams o imposta `system_source`.
 La console semplice su Windows non ha la cronologia dei comandi (la TUI sì).
 
 ## Il segretario (appunti e Jira)

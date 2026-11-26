@@ -51,17 +51,29 @@ class Recorder:
         return os.getpid()
 
     def _capture(self, dev, idx: int, channels: int):
+        # Ogni ~5 s ricontrolla il device predefinito (cuffie collegate/Teams che cambia uscita): se cambia, riapre.
         try:
-            with dev.recorder(samplerate=CAPTURE_SR, channels=channels, blocksize=BLOCK) as rec:
-                while not self._stop.is_set():
-                    x = rec.record(numframes=BLOCK)
-                    if x is None or len(x) == 0:
-                        continue
-                    x = np.asarray(x, dtype=np.float32)
-                    x = x.mean(axis=1) if x.ndim == 2 else x
-                    x = x[: len(x) // 3 * 3].reshape(-1, 3).mean(axis=1)  # 48 kHz → 16 kHz
-                    with self._lock:
-                        self._bufs[idx].append(x)
+            while not self._stop.is_set():
+                with dev.recorder(samplerate=CAPTURE_SR, channels=channels, blocksize=BLOCK) as rec:
+                    n = 0
+                    while not self._stop.is_set():
+                        x = rec.record(numframes=BLOCK)
+                        n += 1
+                        if n % 50 == 0:
+                            try:
+                                new = _open_devices(self.mic, self.system)[idx]
+                            except Exception:  # noqa: BLE001
+                                new = dev
+                            if str(new.name) != str(dev.name):
+                                dev = new
+                                break
+                        if x is None or len(x) == 0:
+                            continue
+                        x = np.asarray(x, dtype=np.float32)
+                        x = x.mean(axis=1) if x.ndim == 2 else x
+                        x = x[: len(x) // 3 * 3].reshape(-1, 3).mean(axis=1)  # 48 kHz → 16 kHz
+                        with self._lock:
+                            self._bufs[idx].append(x)
         except Exception as e:  # noqa: BLE001
             self.error = f"cattura {'microfono' if idx == 0 else 'sistema'}: {e}"
             self._stop.set()
