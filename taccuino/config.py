@@ -100,7 +100,9 @@ class Settings:
 
     # --- trascrizione ---
     asr_model: str | None = None  # override del modello del profilo (repo Hugging Face OpenVINO)
-    vocabulary: str = ""  # nomi/termini ricorrenti, es. "Paolino, Floripa, Kubernetes"
+    vocabulary: str = ""  # termini scritti a mano; si sommano a quelli presi dal vault Obsidian
+    vault_path: str = ""  # vault Obsidian per il vocabolario (vuoto = cercato da solo)
+    vocab_refresh_days: float = 7.0  # ogni quanti giorni il daemon rigenera il vocabolario (0 = mai)  # nomi/termini ricorrenti, es. "Paolino, Floripa, Kubernetes"
 
     @property
     def asr(self) -> tuple[str, str]:

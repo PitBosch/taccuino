@@ -23,6 +23,7 @@ PROMPT = """Sei il segretario dell'utente durante una riunione. L'utente ha appe
 (abbreviato, senza contesto). Interpretalo usando il transcript recente della call.
 
 Oggi è {today}. {when}
+Vocabolario (grafia corretta di nomi e termini ricorrenti): {vocab}
 Appunto dell'utente: «{note}»
 
 Transcript recente (automatico, può avere errori):
@@ -78,7 +79,9 @@ def handle_note(s: Settings, note: str, mdir: Path | None, elapsed: float | None
     when = f"Siamo al minuto {fmt_ts(elapsed)} della riunione." if elapsed is not None else ""
     msgs: list[str] = []
     try:
+        from .vocab import prompt_text
         res = _parse(run_claude(s, PROMPT.format(today=datetime.now().strftime("%A %d/%m/%Y"), when=when,
+                                                 vocab=prompt_text(s) or "-",
                                                  note=note, ctx=_ctx_lines(mdir, s)), timeout=90))
     except Exception as e:  # noqa: BLE001
         return [f"appunto salvato così com'è (Haiku non disponibile: {e})"]

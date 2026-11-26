@@ -67,7 +67,12 @@ class ASR:
         self.pipe = None  # libera il modello precedente prima di ricaricarlo (un solo modello in RAM)
         gc.collect()
         try:
-            self.pipe = self.cls(self.path, device, CACHE_DIR=str(self.cache))
+            props = {"CACHE_DIR": str(self.cache)}
+            if device.startswith("GPU"):
+                # senza questo il driver tiene un core al 100% in attesa attiva mentre la GPU lavora:
+                # stessa velocità, ~8× meno CPU (2,65 s → 0,34 s per chiamata su Iris Xe)
+                props.update(GPU_QUEUE_THROTTLE="LOW", GPU_HOST_TASK_PRIORITY="LOW")
+            self.pipe = self.cls(self.path, device, **props)
         except Exception:  # noqa: BLE001
             self.pipe = self.cls(self.path, device)
         self.device = device

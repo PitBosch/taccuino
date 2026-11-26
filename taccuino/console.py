@@ -183,6 +183,7 @@ class Console:
             if first:
                 shown, cur_dir = set(), mdir
             try:
+                lt.watch()
                 if lt.driver_alive():
                     draft, trailing = lt.shared_draft(), 1.0
                 else:

@@ -94,8 +94,18 @@ def run_claude(s: Settings, prompt: str, timeout: int = 900, allow_tools: list[s
     return res.stdout.strip()
 
 
+def _extra(s: Settings, folder: str = "") -> str:
+    """Istruzioni extra + vocabolario (di progetto se la cartella è già scelta, altrimenti di tutta la KB)."""
+    from .vocab import prompt_text
+    out = (s.claude_extra_prompt + "\n") if s.claude_extra_prompt else ""
+    if (v := prompt_text(s, folder=folder or None)):
+        out += ("Vocabolario dell'utente (grafia corretta di nomi e termini ricorrenti; \"trascritto anche come\" "
+                f"elenca gli errori tipici di Whisper):\n{v}\n")
+    return out
+
+
 def ask(s: Settings, transcript: str, question: str, scope: str) -> str:
-    extra = (s.claude_extra_prompt + "\n") if s.claude_extra_prompt else ""
+    extra = _extra(s)
     return run_claude(s, ASK_PROMPT.format(scope=scope, question=question, extra=extra) + transcript, timeout=300)
 
 
@@ -159,17 +169,12 @@ def choose_folder(s: Settings, transcript: str, user_notes: str = "") -> tuple[s
 def summarize(s: Settings, transcript: str, user_notes: str, started: datetime, duration: float,
               apps: list[str], folder: str = "") -> tuple[str, str, str]:
     """Restituisce (titolo, cartella, note). `folder`: cartella già scelta, da cui prendere il vocabolario."""
-    from . import vocab
     folders = existing_folders(Path(s.output_dir), s.exclude_folders)
-    glossary = vocab.load(s, folder)[0]
-    extra = "\n".join(x for x in (s.claude_extra_prompt,
-                                  f"Vocabolario del progetto (scrivi nomi e termini esattamente così, "
-                                  f"anche nei partecipanti):\n{glossary}" if glossary else "") if x)
     prompt = PROMPT.format(
         date=started.strftime("%d/%m/%Y %H:%M"), duration=round(duration / 60),
         apps=", ".join(apps) or "-", notes=user_notes or "(nessuno)",
         folders=", ".join(f'"{f}"' for f in folders) or "(nessuna, è la prima)",
-        extra=extra + "\n" if extra else "")
+        extra=_extra(s, folder))
     out = run_claude(s, prompt + transcript)
     title = folder = ""
     lines = out.split("\n")

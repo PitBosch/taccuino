@@ -13,6 +13,7 @@
   taccuino stop                   ferma la registrazione in corso
   taccuino note "testo"           appunto per il segretario (Haiku): nota + eventuale task Jira
   taccuino jira [ok N|no N]       proposte Jira del segretario
+  taccuino vocabolario [--show]   Haiku compila il vocabolario (nomi, progetti, termini) dal vault Obsidian
   taccuino process FILE|DIR       elabora un file audio/video o una cartella riunione
   taccuino summarize DIR          rigenera solo le note di Claude
   taccuino list                   ultime riunioni elaborate
@@ -114,6 +115,7 @@ def main(argv=None):
     sub.add_parser("sottotitoli")
     sub.add_parser("live-worker").add_argument("dir")
     sub.add_parser("jira").add_argument("args", nargs="*")
+    v = sub.add_parser("vocabolario"); v.add_argument("--vault", default=""); v.add_argument("--show", action="store_true")
     sub.add_parser("start").add_argument("title", nargs="?", default="")
     sub.add_parser("note").add_argument("text", nargs="+")
     p = sub.add_parser("process"); p.add_argument("path"); p.add_argument("--title", default="")
@@ -137,6 +139,14 @@ def main(argv=None):
         except ImportError:  # niente terminale (o prompt_toolkit mancante): console semplice
             from .console import run
         run()
+
+    elif a.cmd == "vocabolario":
+        from .vocab import VOCAB_PATH, build, terms
+        if a.show:
+            t = terms(s)
+            print(f"{len(t)} termini ({VOCAB_PATH}):\n" + ", ".join(t))
+        else:
+            build(s, Path(a.vault).expanduser() if a.vault else None)
 
     elif a.cmd == "jira":
         from .console import Console

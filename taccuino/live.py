@@ -23,6 +23,7 @@ from .audio import SR
 from .compat import NO_WINDOW, try_lock
 from .config import Settings
 from .pipeline import Line, _dedupe_echo
+from .vocab import prompt_text as vocab_prompt
 
 FRAME = 480          # 30 ms
 FS = FRAME / SR
@@ -138,6 +139,16 @@ class LiveTranscript:
         except (FileNotFoundError, ValueError):
             return False
 
+    # Console e sottotitoli segnalano che stanno guardando: solo allora il worker calcola la bozza.
+    def watch(self):
+        (self.mdir / "live.viewer").write_text(f"{time.time():.1f}")
+
+    def viewer_active(self) -> bool:
+        try:
+            return time.time() - float((self.mdir / "live.viewer").read_text()) < 5
+        except (FileNotFoundError, ValueError):
+            return False
+
     def shared_draft(self) -> str:
         """Bozza corrente, anche se la sta producendo un altro processo (console o sottotitoli)."""
         try:
@@ -174,21 +185,16 @@ class LiveTranscript:
         except (FileNotFoundError, ValueError):
             return 0.0
 
-    def vocab(self) -> tuple[str, str]:
-        """Vocabolari della cartella scelta per questa riunione (tutti, finché la cartella non è decisa)."""
-        from . import vocab
-        try:
-            folder = json.loads((self.mdir / "meta.json").read_text()).get("folder", "")
-        except (OSError, ValueError):
-            folder = ""
-        return vocab.load(self.s, folder)
-
     def refresh_vocab(self) -> str:
-        """Aggiorna il prompt di Whisper (la cartella può essere stata scelta nel frattempo); restituisce il testo per Haiku."""
-        full, prompt = self.vocab()
+        """Prompt di Whisper aggiornato con la cartella scelta per questa riunione (all'inizio vale tutta la KB);
+        restituisce il testo completo per Haiku."""
+        try:
+            folder = json.loads((self.mdir / "meta.json").read_text()).get("folder") or None
+        except (OSError, ValueError):
+            folder = None
         if self.asr is not None:
-            self.asr.vocabulary = prompt
-        return full
+            self.asr.vocabulary = vocab_prompt(self.s, 40, folder)
+        return vocab_prompt(self.s, None, folder)
 
     def load(self, log=lambda _: None):
         if self.asr is None:
@@ -286,8 +292,9 @@ class LiveTranscript:
                 self.load()
             return len(self._commit(x[: cut * FRAME], start))
 
-    def step(self) -> tuple[list[Line], str, float]:
-        """Un passo dello streaming: (righe appena fissate, bozza corrente, secondi di silenzio finale)."""
+    def step(self, want_draft: bool = True) -> tuple[list[Line], str, float]:
+        """Un passo dello streaming: (righe appena fissate, bozza corrente, secondi di silenzio finale).
+        want_draft=False: niente bozza (nessuno la guarda), solo frasi fissate alle pause → molto più leggero."""
         audio = self.mdir / "audio.flac"
         lock = self._locked() if audio.exists() and not self.driver_alive() else None
         self.driving = bool(lock)
@@ -320,7 +327,8 @@ class LiveTranscript:
                 cut = (lo + int(quiet[-1]) if len(quiet) else int(FORCE_COMMIT / FS)) * FRAME
             if cut:
                 return self._commit(x[:cut], start, pause), "", trailing
-            if len(x) - self._draft_len >= int(0.8 * SR):  # bozza: ritrascrivi solo se c'è audio nuovo
+            new_speech = both[int(self._draft_len / FRAME):].any() if self._draft_len < len(x) else False
+            if want_draft and new_speech and len(x) - self._draft_len >= int(0.8 * SR):  # solo se c'è parlato nuovo
                 mix = x[:, 0] * 0.5 + x[:, 1] * 0.5
                 secs = max(_speech(x[:, 0]).sum(), _speech(x[:, 1]).sum()) * FS
                 self._set_draft(_plausible(self.asr.transcribe(mix), secs), len(x))

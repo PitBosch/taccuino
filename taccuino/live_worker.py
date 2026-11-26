@@ -30,6 +30,8 @@ Non commentare la qualità della trascrizione e non scrivere che qualcosa "non �
 confuso per essere utile, semplicemente non annotarlo. Nelle azioni ometti "quando" se non è stato detto.
 Se nel transcript nuovo non c'è nulla che meriti un appunto, rispondi solo: NIENTE
 
+Vocabolario (grafia corretta di nomi e termini ricorrenti): {vocab}
+
 {folder_rule}
 Rispondi in questo formato (lingua della riunione):
 TITOLO: <titolo provvisorio, max 8 parole>
@@ -103,7 +105,8 @@ class LiveNotes:
         rule = FOLDER_KEEP.format(folder=folder) if folder else FOLDER_FIRST.format(
             folders=", ".join(f'"{f}"' for f in existing_folders(root, self.s.exclude_folders)) or "(nessuna)")
         try:
-            out = run_claude(self.s, NOTES_PROMPT.format(folder_rule=rule, prev=prev[-4000:], user=user,
+            from .vocab import prompt_text
+            out = run_claude(self.s, NOTES_PROMPT.format(folder_rule=rule, vocab=prompt_text(self.s, folder=folder or None) or "-", prev=prev[-4000:], user=user,
                                                          span=span, new=new), timeout=120)
         except Exception as e:  # noqa: BLE001
             print(f"appunti live: Claude non disponibile ({e})", flush=True)
@@ -156,6 +159,7 @@ def run(mdir: str):
     cleaning = threading.Event()
     noting = threading.Event()
     last_speech = time.time()
+    watched = False
 
     def bg(ev: threading.Event, fn):
         ev.set()
@@ -176,7 +180,8 @@ def run(mdir: str):
             break
         lt.beat()
         try:
-            _, _, trailing = lt.step()
+            watched = lt.viewer_active()
+            _, _, trailing = lt.step(want_draft=watched)
         except Exception as e:  # noqa: BLE001
             print(f"live: {e}", flush=True)
             stop.wait(3)
@@ -190,7 +195,7 @@ def run(mdir: str):
                 Cleaner(lt).run()
                 notes.run()
             bg(noting, clean_then_note)
-        stop.wait(0.2)
+        stop.wait(0.25 if watched else 0.6)
     # fine call: ultima correzione e ultimo giro di appunti, poi esci (la pipeline finale fa il resto)
     for ev in (cleaning, noting):
         while ev.is_set():
