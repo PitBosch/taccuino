@@ -60,6 +60,8 @@ class Settings:
     mic_source: str = "default"
     system_source: str = "@DEFAULT_MONITOR@"
     output_dir: str = field(default_factory=_default_output_dir)
+    # sottocartelle dell'archivio dove Claude non deve mai archiviare note (es. cartelle di servizio di un vault)
+    exclude_folders: list = field(default_factory=list)
 
     # --- rilevamento automatico delle riunioni ---
     auto_detect: bool = True

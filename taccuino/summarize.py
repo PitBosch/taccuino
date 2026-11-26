@@ -95,14 +95,16 @@ def ask(s: Settings, transcript: str, question: str, scope: str) -> str:
     return run_claude(s, ASK_PROMPT.format(scope=scope, question=question, extra=extra) + transcript, timeout=300)
 
 
-def existing_folders(root: Path) -> list[str]:
-    """Sottocartelle (fino a 2 livelli) dell'archivio note."""
+def existing_folders(root: Path, exclude=()) -> list[str]:
+    """Sottocartelle (fino a 2 livelli) dell'archivio note, senza quelle nascoste o in `exclude` (sottoalbero incluso)."""
     if not root.is_dir():
         return []
+    ex = {e.lower() for e in exclude}
     out = []
     for d in sorted(root.glob("*")) + sorted(root.glob("*/*")):
-        if d.is_dir() and not any(part.startswith(".") for part in d.relative_to(root).parts):
-            out.append(d.relative_to(root).as_posix())
+        parts = d.relative_to(root).parts
+        if d.is_dir() and not any(p.startswith(".") for p in parts) and not ex & {p.lower() for p in parts}:
+            out.append("/".join(parts))
     return out
 
 
@@ -119,7 +121,7 @@ def clean_folder(folder: str) -> str:
 def summarize(s: Settings, transcript: str, user_notes: str, started: datetime, duration: float,
               apps: list[str]) -> tuple[str, str, str]:
     """Restituisce (titolo, cartella, note)."""
-    folders = existing_folders(Path(s.output_dir))
+    folders = existing_folders(Path(s.output_dir), s.exclude_folders)
     prompt = PROMPT.format(
         date=started.strftime("%d/%m/%Y %H:%M"), duration=round(duration / 60),
         apps=", ".join(apps) or "-", notes=user_notes or "(nessuno)",

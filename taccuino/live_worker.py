@@ -89,7 +89,7 @@ class LiveNotes:
         folder = meta.get("folder", "")
         root = Path(self.s.output_dir)
         rule = FOLDER_KEEP.format(folder=folder) if folder else FOLDER_FIRST.format(
-            folders=", ".join(f'"{f}"' for f in existing_folders(root)) or "(nessuna)")
+            folders=", ".join(f'"{f}"' for f in existing_folders(root, self.s.exclude_folders)) or "(nessuna)")
         prev = self.path.read_text().strip() if self.path.exists() else "(nessuno)"
         from .pipeline import user_notes_of
         user = user_notes_of(self.mdir) or "(nessuno)"
