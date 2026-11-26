@@ -173,6 +173,7 @@ def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
 
     title, notes, folder = meta.get("title") or "", "", meta.get("folder", "")
     reason = meta.get("folder_reason", "")
+    had_folder = bool(folder)  # cartella già scelta prima di questa elaborazione (la nota può essere stata spostata a mano)
     if s.summarize and lines and not folder:
         from .summarize import choose_folder
         log("Claude guarda l'archivio per scegliere la cartella …")
@@ -213,7 +214,7 @@ def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
     provisional = bool(oldp) and "in corso…" in oldp.read_text()[:300]
     # nota provvisoria del live worker → sostituita da quella finale nella cartella scelta;
     # nota finale già esistente (rielaborazione) → stesso file, anche se l'hai spostato tu
-    out = oldp if oldp and not provisional else outdir / name
+    out = oldp if oldp and not provisional and (had_folder or oldp.parent == outdir) else outdir / name
     if out == oldp and oldp.name != name and not oldp.with_name(name).exists():
         out = oldp.with_name(name)  # rielaborazione: la nota prende il nuovo titolo restando dove l'hai messa
     out.write_text("\n".join(md))
