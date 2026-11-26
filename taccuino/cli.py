@@ -33,50 +33,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from .compat import IS_WIN
+from . import platforms
+from .platforms import IS_WIN
 from .config import CONTROL_PATH, DATA_DIR, MEETINGS_DIR, STATE_PATH, load_settings, save_settings
-
-SERVICE = """[Unit]
-Description=Taccuino - note di riunione locali
-After=pipewire.service pipewire-pulse.service
-Wants=pipewire-pulse.service
-
-[Service]
-ExecStart={exe} daemon
-Restart=on-failure
-RestartSec=5
-Environment=PATH={path}
-Nice=5
-
-[Install]
-WantedBy=default.target
-"""
-
-
-WIN_TASK = "Taccuino"
-
-
-def _win_install_service():
-    """Windows: attività dell'Utilità di pianificazione che avvia il daemon (senza finestra) all'accesso."""
-    exe = Path(sys.executable)
-    pyw = exe.with_name("pythonw.exe")
-    pyw = pyw if pyw.exists() else exe
-    tr = f'"{pyw}" -X utf8 -m taccuino.cli daemon'
-    r = subprocess.run(["schtasks", "/Create", "/SC", "ONLOGON", "/TN", WIN_TASK, "/TR", tr, "/RL", "LIMITED", "/F"],
-                       capture_output=True, text=True)
-    if r.returncode:  # senza admin schtasks /SC ONLOGON è negato: Register-ScheduledTask per il solo utente corrente funziona
-        ps = (f"$a=New-ScheduledTaskAction -Execute '{pyw}' -Argument '-X utf8 -m taccuino.cli daemon';"
-              "$t=New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME;"
-              "$s=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries "
-              "-ExecutionTimeLimit ([TimeSpan]::Zero);"
-              f"Register-ScheduledTask -TaskName '{WIN_TASK}' -Action $a -Trigger $t -Settings $s "
-              "-User $env:USERNAME -RunLevel Limited -Force -ErrorAction Stop | Out-Null")
-        r2 = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True)
-        if r2.returncode:
-            sys.exit("schtasks: " + (r.stderr or r.stdout).strip() + "\n" + r2.stderr.strip())
-    subprocess.run(["schtasks", "/Run", "/TN", WIN_TASK], capture_output=True)
-    print(f"Attività \"{WIN_TASK}\" creata: parte a ogni accesso.\nLog: {DATA_DIR / 'daemon.log'}")
-
 
 def _state():
     for _ in range(5):  # il daemon riscrive il file: per un istante può essere vuoto o incompleto
@@ -169,35 +128,16 @@ def main(argv=None):
         from .daemon import run
         run()
 
-    elif a.cmd == "install-service" and IS_WIN:
-        _win_install_service()
+    elif a.cmd == "install-service":
+        platforms.install_service()
 
     elif a.cmd == "uninstall-service":
         if _state():
             _send("quit")
-        if IS_WIN:
-            subprocess.run(["schtasks", "/End", "/TN", WIN_TASK], capture_output=True)
-            r = subprocess.run(["schtasks", "/Delete", "/TN", WIN_TASK, "/F"], capture_output=True, text=True)
-            print("Attività rimossa" if r.returncode == 0 else (r.stderr or r.stdout).strip())
-        else:
-            subprocess.run(["systemctl", "--user", "disable", "--now", "taccuino.service"])
-            (Path.home() / ".config/systemd/user/taccuino.service").unlink(missing_ok=True)
-            subprocess.run(["systemctl", "--user", "daemon-reload"])
-            print("Servizio rimosso")
+        platforms.uninstall_service()
 
     elif a.cmd == "quit":
         _send("quit"); print("daemon fermato")
-
-    elif a.cmd == "install-service":
-        exe = shutil.which("taccuino") or str(Path(sys.argv[0]).resolve())
-        unit = Path.home() / ".config/systemd/user/taccuino.service"
-        unit.parent.mkdir(parents=True, exist_ok=True)
-        path = ":".join(dict.fromkeys([str(Path(exe).parent), str(Path(s.claude_bin).parent),
-                                       str(Path.home() / ".local/bin"), "/usr/local/bin", "/usr/bin", "/bin"]))
-        unit.write_text(SERVICE.format(exe=exe, path=path))
-        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-        subprocess.run(["systemctl", "--user", "enable", "--now", "taccuino.service"], check=True)
-        print(f"Installato {unit}\nLog: journalctl --user -u taccuino -f")
 
     elif a.cmd == "status":
         st = _state()
@@ -245,14 +185,9 @@ def main(argv=None):
         if "NPU" not in core.available_devices:
             print("NPU    non trovata (serve Core Ultra + driver NPU Intel"
                   f"{'' if IS_WIN else ': intel/linux-npu-driver'})")
-        if IS_WIN:
-            from .winaudio import list_devices
-            print("\n" + list_devices())
-        else:
-            out = subprocess.run(["ffmpeg", "-hide_banner", "-sources", "pulse"], capture_output=True, text=True)
-            print("\nSorgenti audio:\n" + (out.stdout or out.stderr))
+        print("\n" + platforms.list_audio_devices())
         if not shutil.which("ffmpeg"):
-            print("\n⚠ ffmpeg non trovato nel PATH" + (" (winget install Gyan.FFmpeg)" if IS_WIN else ""))
+            print("\n⚠ ffmpeg non trovato nel PATH" + (f" ({platforms.ffmpeg_hint})" if platforms.ffmpeg_hint else ""))
 
     elif a.cmd == "download":
         from .engines import ensure_diarization_models, ensure_whisper

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .compat import NO_WINDOW
+from .system import NO_WINDOW
 
 SR = 16000
 CAPTURE_SR = 48000            # formato di mix tipico di Windows; si riduce a 16 kHz mediando 3 campioni
