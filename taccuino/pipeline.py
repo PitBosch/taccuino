@@ -184,7 +184,7 @@ def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
         log("chiedo le note a Claude Code (Haiku) …")
         try:
             t_title, t_folder, notes = summarize(s, transcript, user_notes, started, duration, meta.get("apps", []))
-            title = title or t_title
+            title = t_title or title  # il titolo scritto da Haiku sul contenuto vince su quello provvisorio/manuale
             folder = folder or t_folder
         except Exception as e:  # noqa: BLE001
             log(f"Claude Code non disponibile: {e}")
@@ -214,9 +214,11 @@ def process_meeting(mdir: Path, s: Settings, log=print) -> Path:
     # nota provvisoria del live worker → sostituita da quella finale nella cartella scelta;
     # nota finale già esistente (rielaborazione) → stesso file, anche se l'hai spostato tu
     out = oldp if oldp and not provisional else outdir / name
+    if out == oldp and oldp.name != name and not oldp.with_name(name).exists():
+        out = oldp.with_name(name)  # rielaborazione: la nota prende il nuovo titolo restando dove l'hai messa
     out.write_text("\n".join(md))
-    if provisional and oldp != out:
-        oldp.unlink()
+    if oldp and oldp != out:
+        oldp.unlink()  # nota provvisoria sostituita, o file rinominato con il nuovo titolo
     meta.update(title=title, folder=folder, folder_reason=reason, output=str(out), processed=time.time(),
                 duration=duration)
     (mdir / "meta.json").write_text(json.dumps(meta, indent=1))

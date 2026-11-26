@@ -1,6 +1,7 @@
 """Whisper (OpenVINO GenAI su GPU/NPU/CPU) e diarization (sherpa-onnx su CPU)."""
 from __future__ import annotations
 
+import gc
 import re
 import tarfile
 import tempfile
@@ -51,20 +52,43 @@ class ASR:
                  quiet: bool = False):
         import openvino_genai as ov_genai
         t = time.time()
-        path = ensure_whisper(repo_id)
+        self.path = ensure_whisper(repo_id)
         self.whisper = "whisper" in repo_id.lower()
-        cls = ov_genai.WhisperPipeline if self.whisper else ov_genai.ASRPipeline
-        cache = MODELS_DIR.parent / "ov_cache"  # kernel GPU compilati: il secondo avvio è molto più veloce
-        cache.mkdir(parents=True, exist_ok=True)
-        try:
-            self.pipe = cls(path, device, CACHE_DIR=str(cache))
-        except Exception:  # noqa: BLE001
-            self.pipe = cls(path, device)
+        self.cls = ov_genai.WhisperPipeline if self.whisper else ov_genai.ASRPipeline
+        self.cache = MODELS_DIR.parent / "ov_cache"  # kernel GPU/NPU compilati: il secondo avvio è molto più veloce
+        self.cache.mkdir(parents=True, exist_ok=True)
+        self.device, self.pipe = device, None
+        self._open(device)
         self.language, self.vocabulary = language, vocabulary
         if not quiet:
-            print(f"[taccuino] {repo_id.split('/')[-1]} su {device} pronto in {time.time() - t:.1f}s", flush=True)
+            print(f"[taccuino] {repo_id.split('/')[-1]} su {self.device} pronto in {time.time() - t:.1f}s", flush=True)
+
+    def _open(self, device: str):
+        self.pipe = None  # libera il modello precedente prima di ricaricarlo (un solo modello in RAM)
+        gc.collect()
+        try:
+            self.pipe = self.cls(self.path, device, CACHE_DIR=str(self.cache))
+        except Exception:  # noqa: BLE001
+            self.pipe = self.cls(self.path, device)
+        self.device = device
 
     def transcribe(self, audio: np.ndarray) -> str:
+        try:
+            return self._transcribe(audio)
+        except Exception as e:  # noqa: BLE001
+            # device caduto (es. DEVICE_LOST): ricarica lo STESSO modello sullo stesso device e riprova, max 2 volte
+            for attempt in (1, 2):
+                print(f"[taccuino] errore su {self.device} ({str(e)[:120]}): ricarico e riprovo ({attempt}/2)",
+                      flush=True)
+                time.sleep(2)
+                try:
+                    self._open(self.device)
+                    return self._transcribe(audio)
+                except Exception as e2:  # noqa: BLE001
+                    e = e2
+            raise e
+
+    def _transcribe(self, audio: np.ndarray) -> str:
         kw: dict = {}
         if self.whisper:
             kw["task"] = "transcribe"
