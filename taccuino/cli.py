@@ -78,10 +78,15 @@ def _win_install_service():
 
 
 def _state():
-    if not STATE_PATH.exists():
-        return None
-    st = json.loads(STATE_PATH.read_text())
-    return st if time.time() - st.get("updated", 0) < 30 else None
+    for _ in range(5):  # il daemon riscrive il file: per un istante può essere vuoto o incompleto
+        try:
+            st = json.loads(STATE_PATH.read_text())
+            return st if time.time() - st.get("updated", 0) < 30 else None
+        except FileNotFoundError:
+            return None
+        except (ValueError, OSError):
+            time.sleep(0.05)
+    return None
 
 
 def _send(cmd: str):
