@@ -1,4 +1,8 @@
-# Taccuino
+<p align="center">
+  <img src="docs/assets/logo.svg" width="96" alt="Logo di Taccuino">
+</p>
+
+<h1 align="center">Taccuino</h1>
 
 Registratore di riunioni **sempre attivo**, ispirato a Granola, **senza bot** che entrano nella call.
 Funziona su **Windows** e **Linux**. Trascrive in locale (Whisper su GPU/NPU Intel con OpenVINO); le note le scrive

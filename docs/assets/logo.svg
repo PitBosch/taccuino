@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="taccuino">
+  <title>taccuino</title>
+  <!-- pagina -->
+  <rect x="24" y="18" width="80" height="96" rx="10" fill="#FFF8E7" stroke="#1F2937" stroke-width="5"/>
+  <!-- anelli spirale -->
+  <g fill="none" stroke="#1F2937" stroke-width="5" stroke-linecap="round">
+    <path d="M44 10 v16"/>
+    <path d="M64 10 v16"/>
+    <path d="M84 10 v16"/>
+  </g>
+  <!-- forma d'onda (le "righe" del taccuino) -->
+  <g stroke="#1F2937" stroke-width="5" stroke-linecap="round">
+    <path d="M42 70 v4"/>
+    <path d="M52 62 v20"/>
+    <path d="M62 54 v36"/>
+    <path d="M72 64 v16"/>
+    <path d="M82 68 v8"/>
+  </g>
+  <!-- punto REC -->
+  <circle cx="88" cy="40" r="5" fill="#E5484D"/>
+</svg>
