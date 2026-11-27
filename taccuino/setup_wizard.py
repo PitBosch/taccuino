@@ -15,7 +15,8 @@ import sys
 from pathlib import Path
 
 from . import platforms
-from .config import ASR_MODELS, ASR_PROFILES, CONFIG_PATH, DATA_DIR, load_settings, model_path, save_settings
+from .config import (ASR_MODELS, ASR_PROFILES, CONFIG_PATH, DATA_DIR, is_parakeet, load_settings, model_path,
+                     save_settings)
 
 # Soglie euristiche, NON misurate: il solo dato misurato è turbo-int8 ≈ 1-2 GB di RAM residenti con Whisper caricato.
 # Verifica con `python scripts/bench_asr.py` prima di fidarti di un modello più piccolo.
@@ -77,6 +78,11 @@ def doctor() -> int:
     model, device = s.asr
     have = (model_path(model) / ".taccuino-complete").exists()
     line(have, f"modello {model.split('/')[-1]} su {device}", "scaricato" if have else "da scaricare: taccuino download")
+    if is_parakeet(model):
+        from .native import lib_path
+        lp = lib_path()
+        line(lp.exists(), "libreria Parakeet (whisper.cpp)", str(lp) if lp.exists() else
+             f"da compilare: taccuino parakeet-build (serve {platforms.build_hint})")
     if device != "CPU" and devs:
         line(any(d.startswith(device) for d in devs), f"dispositivo {device} presente")
     out = Path(s.output_dir).expanduser()

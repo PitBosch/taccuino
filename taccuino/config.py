@@ -25,6 +25,7 @@ STATE_PATH = DATA_DIR / "state.json"
 CONTROL_PATH = DATA_DIR / "control"
 
 ASR_PROFILES = {
+    "parakeet": ("ggml-org/parakeet-tdt-0.6b-v3-q4_0", "CPU"),  # whisper.cpp, pesi letti dal disco: ~200 MB di RAM
     "xe": ("OpenVINO/whisper-large-v3-turbo-int8-ov", "GPU"),
     "npu": ("OpenVINO/whisper-large-v3-turbo-int8-ov", "NPU"),
     "cpu": ("OpenVINO/whisper-small-int8-ov", "CPU"),
@@ -33,6 +34,7 @@ ASR_PROFILES = {
 # Modelli Whisper OpenVINO scelti da `taccuino setup --model` (repo reali su Hugging Face). Dal più preciso al più leggero.
 # La RAM non è stata misurata per tutti: solo turbo-int8 (≈ 1-2 GB con il modello caricato).
 ASR_MODELS = {
+    "parakeet-q4": "ggml-org/parakeet-tdt-0.6b-v3-q4_0",  # non Whisper: Parakeet su whisper.cpp (CPU)
     "turbo-int8": "OpenVINO/whisper-large-v3-turbo-int8-ov",
     "turbo-int4": "OpenVINO/whisper-large-v3-turbo-int4-ov",
     "small-int8": "OpenVINO/whisper-small-int8-ov",
@@ -136,6 +138,10 @@ def load_settings() -> Settings:
 def save_settings(s: Settings) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(json.dumps(asdict(s), indent=2))
+
+
+def is_parakeet(repo_id: str) -> bool:
+    return repo_id.split("/")[-1].startswith("parakeet")
 
 
 def model_path(repo_id: str) -> Path:

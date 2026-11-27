@@ -12,6 +12,9 @@ IS_WIN = True
 NO_WINDOW: dict = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
 claude_exe_name = "claude.exe"
 ffmpeg_hint = "winget install Gyan.FFmpeg"
+native_lib_name = "taccuino-asr.dll"  # libreria Parakeet compilata da `taccuino parakeet-build`
+build_hint = ("winget install Git.Git Kitware.CMake Microsoft.VisualStudio.2022.BuildTools "
+              "(con il carico di lavoro \"Sviluppo di applicazioni desktop con C++\")")
 
 
 def try_lock(f) -> bool:

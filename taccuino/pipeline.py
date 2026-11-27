@@ -13,7 +13,7 @@ import numpy as np
 
 from .audio import SR, load_channels, speech_ratio
 from .config import Settings
-from .engines import ASR, Diarizer, Turn
+from .engines import Diarizer, Turn, make_asr
 from .summarize import summarize
 
 MAX_TURN = 25.0  # Whisper lavora su finestre da 30 s
@@ -92,7 +92,7 @@ def transcribe_recording(audio_path: Path, s: Settings, log=print) -> tuple[list
         return [], duration
 
     from .vocab import prompt_text
-    asr = ASR(*s.asr, language=s.language, vocabulary=prompt_text(s, 40))
+    asr = make_asr(*s.asr, language=s.language, vocabulary=prompt_text(s, 40))
     lines: dict[str, list[Line]] = {}
     t = time.time()
     for name, plan in plans.items():

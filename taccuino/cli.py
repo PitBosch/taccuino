@@ -23,6 +23,7 @@
   taccuino doctor                 controlla requisiti e configurazione (sola lettura)
   taccuino setup [--yes …]        configura profilo e modello in base alla macchina (vedi --help)
   taccuino download               scarica i modelli (Whisper + diarization)
+  taccuino parakeet-build         compila la libreria di Parakeet (whisper.cpp, serve git + cmake + compilatore)
   taccuino config [KEY [VALUE]]   mostra/modifica le impostazioni
 """
 from __future__ import annotations
@@ -68,16 +69,16 @@ def _send(cmd: str):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="taccuino", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--profile", help="xe | npu | cpu")
+    ap.add_argument("--profile", help="parakeet | xe | npu | cpu")
     sub = ap.add_subparsers(dest="cmd")
     for c in ("daemon", "install-service", "uninstall-service", "quit", "status", "stop", "list", "devices",
-              "download"):
+              "download", "parakeet-build"):
         sub.add_parser(c)
     sub.add_parser("doctor")
     st = sub.add_parser("setup")
     st.add_argument("--yes", action="store_true", help="applica senza chiedere (necessario senza terminale)")
     st.add_argument("--output-dir", default="", help="cartella dove scrivere le note")
-    st.add_argument("--model", default="", help="turbo-int8 | turbo-int4 | small-int8 | small-int4 | base-int8")
+    st.add_argument("--model", default="", help="parakeet-q4 | turbo-int8 | turbo-int4 | small-int8 | small-int4 | base-int8")
     st.add_argument("--download", action="store_true", help="scarica il modello Whisper")
     st.add_argument("--with-diarization", action="store_true", help="con --download: scarica anche la diarization")
     st.add_argument("--service", action="store_true", help="installa il servizio all'accesso")
@@ -237,6 +238,14 @@ def main(argv=None):
     elif a.cmd == "download":
         from .engines import ensure_diarization_models, ensure_whisper
         print(ensure_whisper(s.asr[0])); print(*ensure_diarization_models(), sep="\n")
+        from .config import is_parakeet
+        from .native import lib_path
+        if is_parakeet(s.asr[0]) and not lib_path().exists():
+            print("Per Parakeet serve anche la libreria: taccuino parakeet-build")
+
+    elif a.cmd == "parakeet-build":
+        from .native import build
+        build()
 
     elif a.cmd == "process":
         from .pipeline import process_meeting

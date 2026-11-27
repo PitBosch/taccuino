@@ -1,4 +1,4 @@
-"""Whisper (OpenVINO GenAI su GPU/NPU/CPU) e diarization (sherpa-onnx su CPU)."""
+"""Trascrizione (Whisper su OpenVINO GenAI, oppure Parakeet su whisper.cpp in CPU) e diarization (sherpa-onnx su CPU)."""
 from __future__ import annotations
 
 import gc
@@ -11,10 +11,14 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .config import EMBEDDING_URL, MODELS_DIR, SEGMENTATION_URL, model_path
+from .config import EMBEDDING_URL, MODELS_DIR, SEGMENTATION_URL, is_parakeet, model_path
+
+PARAKEET_URL = "https://huggingface.co/ggml-org/parakeet-GGUF/resolve/main/ggml-{name}.bin"
 
 
 def ensure_whisper(repo_id: str) -> str:
+    if is_parakeet(repo_id):
+        return ensure_parakeet(repo_id)
     p = model_path(repo_id)
     marker = p / ".taccuino-complete"
     if not marker.exists():
@@ -24,6 +28,28 @@ def ensure_whisper(repo_id: str) -> str:
         snapshot_download(repo_id, local_dir=str(p))
         marker.touch()
     return str(p)
+
+
+def ensure_parakeet(repo_id: str) -> str:
+    """Modello Parakeet in formato ggml (un file solo); la cartella ha lo stesso marcatore dei modelli Whisper."""
+    p = model_path(repo_id)
+    f = p / "model.bin"
+    marker = p / ".taccuino-complete"
+    if not marker.exists():
+        p.mkdir(parents=True, exist_ok=True)
+        print(f"[taccuino] scarico {repo_id} …", flush=True)
+        tmp = f.with_suffix(".part")
+        urllib.request.urlretrieve(PARAKEET_URL.format(name=repo_id.split("/")[-1]), tmp)
+        tmp.replace(f)
+        marker.touch()
+    return str(f)
+
+
+def make_asr(repo_id: str, device: str, language: str | None = None, vocabulary: str = "", quiet: bool = False):
+    """Il motore giusto per il modello configurato: Parakeet (whisper.cpp) oppure Whisper/Qwen3 (OpenVINO)."""
+    if is_parakeet(repo_id):
+        return ParakeetASR(repo_id, device, language, vocabulary, quiet)
+    return ASR(repo_id, device, language, vocabulary, quiet)
 
 
 def ensure_diarization_models() -> tuple[str, str]:
@@ -118,6 +144,69 @@ class ASR:
         if self.vocabulary and len(text.split()) >= 3 and text.lower().strip(" .,") in self.vocabulary.lower():
             return ""  # su silenzio/rumore Whisper può ripetere il prompt (l'elenco di termini)
         return "" if _HALLU.match(text) else text
+
+
+def split_quiet(x: np.ndarray, max_secs: float, sr: int = 16000) -> list[np.ndarray]:
+    """Taglia l'audio in pezzi ≤ max_secs, ognuno nel punto più silenzioso dell'ultimo terzo (per non spezzare parole)."""
+    out, n, hop = [], int(max_secs * sr), sr // 20
+    while x.size > n:
+        lo = int(n * 2 / 3)
+        frames = x[lo:n][: (n - lo) // hop * hop].reshape(-1, hop)
+        cut = lo + int(np.argmin((frames ** 2).mean(axis=1))) * hop + hop // 2
+        out.append(x[:cut])
+        x = x[cut:]
+    out.append(x)
+    return out
+
+
+class ParakeetASR:
+    """Parakeet TDT 0.6B v3 su whisper.cpp in CPU, con i pesi dell'encoder letti dal disco strato per strato.
+
+    Lingua riconosciuta da solo (25 lingue europee) e nessun prompt: il vocabolario lo usa Haiku quando rivede il
+    testo. Stessa interfaccia di `ASR` (`transcribe`, `vocabulary`, `device`)."""
+
+    def __init__(self, repo_id: str, device: str = "CPU", language: str | None = None, vocabulary: str = "",
+                 quiet: bool = False, threads: int = 4):
+        from . import native
+        t = time.time()
+        self.path = ensure_parakeet(repo_id)
+        self.device, self.language, self.vocabulary = "CPU", language, vocabulary
+        if device != "CPU":
+            raise RuntimeError(f"Parakeet gira solo su CPU (configurato: {device})")
+        self.lib = native.load()
+        self.h = self.lib.tq_open(self.path.encode("utf-8"), threads, 1)
+        if not self.h:
+            raise RuntimeError(f"Parakeet: impossibile caricare {self.path}")
+        if not quiet:
+            print(f"[taccuino] {repo_id.split('/')[-1]} su CPU pronto in {time.time() - t:.1f}s", flush=True)
+
+    MAX_SECS = 30.0  # oltre si taglia: la RAM delle attivazioni cresce con la durata
+
+    def transcribe(self, audio: np.ndarray) -> str:
+        x = np.ascontiguousarray(audio, dtype=np.float32)
+        parts = [self._one(c) for c in split_quiet(x, self.MAX_SECS)]
+        return " ".join(p for p in parts if p)
+
+    def _one(self, x: np.ndarray) -> str:
+        import ctypes
+        if x.size < 1600:  # meno di 0,1 s
+            return ""
+        r = self.lib.tq_transcribe(self.h, x.ctypes.data_as(ctypes.POINTER(ctypes.c_float)), int(x.size))
+        if r is None:
+            raise RuntimeError("Parakeet: trascrizione fallita")
+        text = r.decode("utf-8", "replace").strip()
+        return "" if _HALLU.match(text) else text
+
+    def close(self) -> None:
+        if getattr(self, "h", None):
+            self.lib.tq_close(self.h)
+            self.h = None
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 # Frasi tipiche allucinate da Whisper su silenzio/rumore

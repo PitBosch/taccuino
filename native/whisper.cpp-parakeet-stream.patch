@@ -1,0 +1,557 @@
+diff --git a/examples/CMakeLists.txt b/examples/CMakeLists.txt
+index 7aedb9d..1f649a9 100644
+--- a/examples/CMakeLists.txt
++++ b/examples/CMakeLists.txt
+@@ -108,6 +108,7 @@ else()
+     add_subdirectory(quantize)
+     add_subdirectory(vad-speech-segments)
+     add_subdirectory(parakeet-cli)
++    add_subdirectory(taccuino-asr)
+     add_subdirectory(parakeet-quantize)
+     if (WHISPER_SDL2)
+         add_subdirectory(stream)
+diff --git a/examples/taccuino-asr/CMakeLists.txt b/examples/taccuino-asr/CMakeLists.txt
+new file mode 100644
+index 0000000..b9ba5ee
+--- /dev/null
++++ b/examples/taccuino-asr/CMakeLists.txt
+@@ -0,0 +1,5 @@
++set(TARGET taccuino-asr)
++add_library(${TARGET} SHARED taccuino-asr.cpp)
++target_link_libraries(${TARGET} PRIVATE parakeet)
++set_target_properties(${TARGET} PROPERTIES CXX_VISIBILITY_PRESET hidden POSITION_INDEPENDENT_CODE ON)
++install(TARGETS ${TARGET} LIBRARY RUNTIME)
+diff --git a/examples/taccuino-asr/taccuino-asr.cpp b/examples/taccuino-asr/taccuino-asr.cpp
+new file mode 100644
+index 0000000..7a13a6b
+--- /dev/null
++++ b/examples/taccuino-asr/taccuino-asr.cpp
+@@ -0,0 +1,74 @@
++// Libreria minima per Taccuino: Parakeet (whisper.cpp) chiamabile da Python con ctypes.
++// Tre funzioni C, niente struct da passare: tq_open, tq_transcribe, tq_close.
++#include "parakeet.h"
++
++#include <cstdlib>
++#include <cstring>
++#include <string>
++
++#if defined(_WIN32)
++#define TQ_API extern "C" __declspec(dllexport)
++#else
++#define TQ_API extern "C" __attribute__((visibility("default")))
++#endif
++
++struct tq_ctx {
++    parakeet_context * ctx = nullptr;
++    int n_threads = 4;
++    std::string text;
++};
++
++static void tq_quiet(enum ggml_log_level level, const char * msg, void *) {
++    if (level >= GGML_LOG_LEVEL_WARN && getenv("TQ_ASR_QUIET") == nullptr) {
++        fputs(msg, stderr);
++    }
++}
++
++// stream=1: pesi dell'encoder letti dal disco strato per strato (pochi MB in RAM)
++TQ_API void * tq_open(const char * model_path, int n_threads, int stream) {
++#if defined(_WIN32)
++    _putenv_s("PARAKEET_STREAM", stream ? "1" : "0");
++#else
++    setenv("PARAKEET_STREAM", stream ? "1" : "0", 1);
++#endif
++    if (getenv("TQ_ASR_VERBOSE") == nullptr) {
++        parakeet_log_set(tq_quiet, nullptr);
++    }
++    parakeet_context_params cp = parakeet_context_default_params();
++    cp.use_gpu = false;
++    parakeet_context * ctx = parakeet_init_from_file_with_params(model_path, cp);
++    if (!ctx) {
++        return nullptr;
++    }
++    auto * t = new tq_ctx();
++    t->ctx = ctx;
++    t->n_threads = n_threads > 0 ? n_threads : 4;
++    return t;
++}
++
++// audio mono 16 kHz float32; il testo resta valido fino alla chiamata successiva
++TQ_API const char * tq_transcribe(void * handle, const float * samples, int n_samples) {
++    auto * t = (tq_ctx *) handle;
++    if (!t || !samples || n_samples <= 0) {
++        return "";
++    }
++    parakeet_full_params fp = parakeet_full_default_params(PARAKEET_SAMPLING_GREEDY);
++    fp.n_threads = t->n_threads;
++    if (parakeet_full(t->ctx, fp, samples, n_samples) != 0) {
++        return nullptr;
++    }
++    t->text.clear();
++    const int n = parakeet_full_n_segments(t->ctx);
++    for (int i = 0; i < n; ++i) {
++        t->text += parakeet_full_get_segment_text(t->ctx, i);
++    }
++    return t->text.c_str();
++}
++
++TQ_API void tq_close(void * handle) {
++    auto * t = (tq_ctx *) handle;
++    if (t) {
++        parakeet_free(t->ctx);
++        delete t;
++    }
++}
+diff --git a/src/parakeet.cpp b/src/parakeet.cpp
+index 50dd657..437f10e 100644
+--- a/src/parakeet.cpp
++++ b/src/parakeet.cpp
+@@ -30,6 +30,207 @@
+ #include <codecvt>
+ #endif
+ 
++#if defined(_WIN32)
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#else
++#include <fcntl.h>
++#include <unistd.h>
++#endif
++
++// accesso al file del modello per lo streaming: lettura a una posizione data, senza seek condiviso
++struct parakeet_stream_file {
++#if defined(_WIN32)
++    HANDLE h = INVALID_HANDLE_VALUE;
++
++    bool open(const std::string & path) {
++        int n = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
++        std::wstring w(n > 0 ? n : 1, L'\0');
++        MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, &w[0], n);
++        // SEQUENTIAL_SCAN: la cache di Windows libera prima queste pagine (e resta comunque memoria disponibile)
++        h = CreateFileW(w.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
++                        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
++        return h != INVALID_HANDLE_VALUE;
++    }
++    long long read_at(void * dst, size_t n, size_t off) {
++        OVERLAPPED ov = {};
++        ov.Offset     = (DWORD) (off & 0xFFFFFFFFull);
++        ov.OffsetHigh = (DWORD) ((unsigned long long) off >> 32);
++        DWORD got = 0;
++        const DWORD want = (DWORD) std::min<size_t>(n, 1u << 30);
++        if (!ReadFile(h, dst, want, &got, &ov)) {
++            return -1;
++        }
++        return (long long) got;
++    }
++    void drop(size_t, size_t) {} // Windows non ha un equivalente per intervallo
++    void close() {
++        if (h != INVALID_HANDLE_VALUE) {
++            CloseHandle(h);
++            h = INVALID_HANDLE_VALUE;
++        }
++    }
++#else
++    int fd = -1;
++
++    bool open(const std::string & path) {
++        fd = ::open(path.c_str(), O_RDONLY);
++        return fd >= 0;
++    }
++    long long read_at(void * dst, size_t n, size_t off) {
++        return (long long) pread(fd, dst, n, (off_t) off);
++    }
++    void drop(size_t off, size_t n) {
++#if defined(POSIX_FADV_DONTNEED)
++        posix_fadvise(fd, (off_t) off, (off_t) n, POSIX_FADV_DONTNEED); // via dalla page cache
++#else
++        (void) off; (void) n;
++#endif
++    }
++    void close() {
++        if (fd >= 0) {
++            ::close(fd);
++            fd = -1;
++        }
++    }
++#endif
++};
++
++// ---------------------------------------------------------------------------
++// Streaming dei pesi dell'encoder strato per strato (esperimento, attivato con PARAKEET_STREAM=1).
++//
++// Le grandi matrici di ogni strato conformer NON restano in RAM: ci sono due "slot" grandi
++// quanto uno strato. Mentre la CPU calcola lo strato i (slot i%2), un thread legge dal file lo
++// strato i+1 nell'altro slot; a fine strato i lo slot si libera e parte la lettura di i+2.
++// Dopo ogni lettura si chiede al kernel di non tenere quei dati in cache (POSIX_FADV_DONTNEED),
++// così i pesi non occupano RAM nemmeno come page cache.
++// I tensori piccoli dello strato (norme, bias, conv depthwise, batch norm, attn_pos_w) restano
++// in RAM: alcuni sono usati da operazioni che non dipendono dall'attivazione e il grafo
++// potrebbe eseguirle prima che lo strato sia stato letto.
++// ---------------------------------------------------------------------------
++struct parakeet_stream_rec {
++    struct ggml_tensor * t = nullptr;
++    size_t off    = 0; // posizione nel file
++    size_t nbytes = 0;
++};
++
++struct parakeet_stream {
++    bool enabled = false;
++    parakeet_stream_file file;
++    bool drop_cache = true;
++    int  n_layer = 0;
++
++    ggml_context * ctx = nullptr;                          // metadati dei tensori in streaming
++    std::vector<std::vector<parakeet_stream_rec>> layers;  // per strato
++    std::map<const ggml_tensor *, std::pair<int, int>> index; // tensore -> (strato, posizione)
++
++    ggml_backend_buffer_t slot[2] = { nullptr, nullptr };
++    int in_slot[2] = { -1, -1 };                           // quale strato è caricato in ogni slot
++    std::thread th;
++    std::vector<char> tmp;                                 // buffer di lettura (solo per slot con repack)
++    ggml_backend_buffer_type_t buft = nullptr;             // tipo di buffer scelto per le matrici
++
++    int64_t t_io_us   = 0; // tempo passato a leggere (nel thread di lettura)
++    int64_t t_wait_us = 0; // tempo in cui il calcolo ha aspettato la lettura
++    size_t  bytes_read = 0;
++
++    void load_layer(int il) {
++        const int64_t t0 = ggml_time_us();
++        for (auto & r : layers[il]) {
++            const bool direct = ggml_backend_buffer_is_host(r.t->buffer);
++            if (!direct) {
++                tmp.resize(r.nbytes);
++            }
++            char * dst = direct ? (char *) r.t->data : tmp.data();
++            size_t done = 0;
++            while (done < r.nbytes) {
++                long long n = file.read_at(dst + done, r.nbytes - done, r.off + done);
++                if (n <= 0) {
++                    fprintf(stderr, "parakeet_stream: lettura fallita (strato %d)\n", il);
++                    abort();
++                }
++                done += (size_t) n;
++            }
++            if (!direct) {
++                ggml_backend_tensor_set(r.t, tmp.data(), 0, r.nbytes); // repack per la CPU
++            }
++            if (drop_cache) {
++                file.drop(r.off, r.nbytes);
++            }
++            bytes_read += r.nbytes;
++        }
++        in_slot[il % 2] = il;
++        t_io_us += ggml_time_us() - t0;
++    }
++
++    void start(int il) {
++        if (il >= n_layer || in_slot[il % 2] == il) {
++            return;
++        }
++        th = std::thread([this, il]() { load_layer(il); });
++    }
++
++    void wait() {
++        if (th.joinable()) {
++            const int64_t t0 = ggml_time_us();
++            th.join();
++            t_wait_us += ggml_time_us() - t0;
++        }
++    }
++
++    // prima di calcolare l'encoder: strato 0 pronto, strato 1 in arrivo
++    void begin() {
++        wait();
++        if (in_slot[0] != 0) {
++            const int64_t t0 = ggml_time_us();
++            load_layer(0);
++            t_wait_us += ggml_time_us() - t0;
++        }
++        start(1);
++    }
++
++    ~parakeet_stream() {
++        if (th.joinable()) {
++            th.join();
++        }
++        file.close();
++        for (auto & b : slot) {
++            if (b) {
++                ggml_backend_buffer_free(b);
++            }
++        }
++        if (ctx) {
++            ggml_free(ctx);
++        }
++    }
++};
++
++// impostati da parakeet_init_from_file_* prima del caricamento (lo streaming richiede un file)
++static std::string     g_stream_path;
++static std::ifstream * g_stream_fin = nullptr;
++
++// callback del grafo. L'uscita dello strato i-1 viene rinominata "enc_<i>_res" all'inizio dello strato i:
++// quando quel nodo è calcolato lo strato i-1 è finito, il suo slot è libero e lì si carica lo strato i+1.
++static bool parakeet_stream_eval_cb(struct ggml_tensor * t, bool ask, void * user_data) {
++    int il = -1;
++    char tail[8] = { 0 };
++    const bool hit = sscanf(ggml_get_name(t), "enc_%d_%7s", &il, tail) == 2 && strcmp(tail, "res") == 0 && il >= 1;
++    if (ask) {
++        return hit;
++    }
++    if (hit) {
++        auto * st = (parakeet_stream *) user_data;
++        st->wait();         // lo strato il deve essere pronto prima di calcolarlo
++        st->start(il + 1);  // nello slot dello strato il-1, appena finito
++    }
++    return true;
++}
++
+ #if defined(PARAKEET_BIG_ENDIAN)
+ template<typename T>
+ static T byteswap(T value) {
+@@ -387,6 +588,8 @@ struct parakeet_model {
+ 
+     int n_loaded = 0;
+     std::map<std::string, struct ggml_tensor *> tensors;
++
++    parakeet_stream stream;
+ };
+ 
+ struct parakeet_lstm_state_layer {
+@@ -1272,6 +1475,43 @@ static bool parakeet_model_load(struct parakeet_model_loader * loader, parakeet_
+ 
+     model.layers.resize(n_audio_layer);
+ 
++    // streaming dei pesi: solo se richiesto e se il modello viene da un file
++    auto & stream = model.stream;
++    {
++        const char * env = getenv("PARAKEET_STREAM");
++        stream.enabled = env && atoi(env) > 0 && g_stream_fin != nullptr;
++        const char * keep = getenv("PARAKEET_STREAM_KEEP_CACHE");
++        stream.drop_cache = !(keep && atoi(keep) > 0);
++        if (stream.enabled) {
++            ggml_init_params sp = {
++                /*.mem_size   =*/ (size_t) (16 * n_audio_layer) * ggml_tensor_overhead(),
++                /*.mem_buffer =*/ nullptr,
++                /*.no_alloc   =*/ true,
++            };
++            stream.ctx = ggml_init(sp);
++            stream.n_layer = n_audio_layer;
++            stream.layers.resize(n_audio_layer);
++            PARAKEET_LOG_INFO("%s: streaming dei pesi dell'encoder attivo (2 slot da uno strato)\n", __func__);
++        }
++    }
++
++    // le grandi matrici di uno strato: in streaming non hanno memoria propria
++    auto create_layer_w = [&](parakeet_tensor type, ggml_tensor * meta, int il) -> ggml_tensor * {
++        if (!stream.enabled) {
++            return create_tensor(type, meta, il);
++        }
++        if (!stream.buft) {
++            stream.buft = select_weight_buft(hparams, meta, PARAKEET_TENSOR_INFO.at(type), buft_list);
++        }
++        ggml_tensor * tensor = ggml_dup_tensor(stream.ctx, meta);
++        wctx.model.tensors[format(PARAKEET_TENSOR_NAMES.at(type), il)] = tensor;
++        stream.index[tensor] = { il, (int) stream.layers[il].size() };
++        parakeet_stream_rec rec;
++        rec.t = tensor;
++        stream.layers[il].push_back(rec);
++        return tensor;
++    };
++
+     // Encoder pre_encode
+     const int n_subsampling_channels = hparams.n_subsampling_channels;
+     const int n_pre_enc_features     = (hparams.n_mels / hparams.subsampling_factor) * n_subsampling_channels;
+@@ -1312,9 +1552,9 @@ static bool parakeet_model_load(struct parakeet_model_loader * loader, parakeet_
+         // Feed forward 1
+         layer.norm_ff1_w    = create_tensor(PARAKEET_TENSOR_ENC_NORM_FF1_WEIGHT, ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_audio_state), i);
+         layer.norm_ff1_b    = create_tensor(PARAKEET_TENSOR_ENC_NORM_FF1_BIAS, ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_audio_state), i);
+-        layer.ff1_linear1_w = create_tensor(PARAKEET_TENSOR_ENC_FF1_LINEAR1_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, 4*n_audio_state), i);
++        layer.ff1_linear1_w = create_layer_w(PARAKEET_TENSOR_ENC_FF1_LINEAR1_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, 4*n_audio_state), i);
+         ggml_format_name(layer.ff1_linear1_w, "enc_%d_ff1_linear1_w", i);
+-        layer.ff1_linear2_w = create_tensor(PARAKEET_TENSOR_ENC_FF1_LINEAR2_WEIGHT, ggml_new_tensor_2d(ctx, wtype, 4*n_audio_state, n_audio_state), i);
++        layer.ff1_linear2_w = create_layer_w(PARAKEET_TENSOR_ENC_FF1_LINEAR2_WEIGHT, ggml_new_tensor_2d(ctx, wtype, 4*n_audio_state, n_audio_state), i);
+         ggml_format_name(layer.ff1_linear2_w, "enc_%d_ff1_linear2_w", i);
+ 
+         // Convolution module
+@@ -1322,7 +1562,7 @@ static bool parakeet_model_load(struct parakeet_model_loader * loader, parakeet_
+         ggml_format_name(layer.norm_conv_w, "enc_%d_norm_conv_w", i);
+         layer.norm_conv_b         = create_tensor(PARAKEET_TENSOR_ENC_NORM_CONV_BIAS, ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_audio_state), i);
+         ggml_format_name(layer.norm_conv_b, "enc_%d_norm_conv_b", i);
+-        layer.conv_pw1_w          = create_tensor(PARAKEET_TENSOR_ENC_CONV_PW1_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, 2*n_audio_state), i);
++        layer.conv_pw1_w          = create_layer_w(PARAKEET_TENSOR_ENC_CONV_PW1_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, 2*n_audio_state), i);
+         ggml_format_name(layer.conv_pw1_w, "enc_%d_conv_pw1_w", i);
+         layer.conv_dw_w           = create_tensor(PARAKEET_TENSOR_ENC_CONV_DW_WEIGHT, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hparams.n_conv_kernel, n_audio_state), i);
+         ggml_format_name(layer.conv_dw_w, "enc_%d_conv_dw_w", i);
+@@ -1334,7 +1574,7 @@ static bool parakeet_model_load(struct parakeet_model_loader * loader, parakeet_
+         layer.conv_bn_var         = create_tensor(PARAKEET_TENSOR_ENC_CONV_BN_VAR, ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_audio_state), i);
+         ggml_format_name(layer.conv_bn_var, "enc_%d_conv_bn_var", i);
+         layer.conv_bn_num_batches = create_tensor(PARAKEET_TENSOR_ENC_CONV_BN_NUM_BATCHES, ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 1), i);
+-        layer.conv_pw2_w          = create_tensor(PARAKEET_TENSOR_ENC_CONV_PW2_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, n_audio_state), i);
++        layer.conv_pw2_w          = create_layer_w(PARAKEET_TENSOR_ENC_CONV_PW2_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, n_audio_state), i);
+         ggml_format_name(layer.conv_pw2_w, "enc_%d_conv_pw2_w", i);
+ 
+         // Self attention
+@@ -1342,18 +1582,18 @@ static bool parakeet_model_load(struct parakeet_model_loader * loader, parakeet_
+         layer.norm_attn_b      = create_tensor(PARAKEET_TENSOR_ENC_NORM_ATTN_BIAS, ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_audio_state), i);
+         layer.attn_pos_bias_u  = create_tensor(PARAKEET_TENSOR_ENC_ATTN_POS_BIAS_U, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hparams.n_audio_state / hparams.n_audio_head, hparams.n_audio_head), i);
+         layer.attn_pos_bias_v  = create_tensor(PARAKEET_TENSOR_ENC_ATTN_POS_BIAS_V, ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hparams.n_audio_state / hparams.n_audio_head, hparams.n_audio_head), i);
+-        layer.attn_q_w         = create_tensor(PARAKEET_TENSOR_ENC_ATTN_Q_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, n_audio_state), i);
+-        layer.attn_k_w         = create_tensor(PARAKEET_TENSOR_ENC_ATTN_K_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, n_audio_state), i);
+-        layer.attn_v_w         = create_tensor(PARAKEET_TENSOR_ENC_ATTN_V_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, n_audio_state), i);
+-        layer.attn_out_w       = create_tensor(PARAKEET_TENSOR_ENC_ATTN_OUT_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, n_audio_state), i);
++        layer.attn_q_w         = create_layer_w(PARAKEET_TENSOR_ENC_ATTN_Q_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, n_audio_state), i);
++        layer.attn_k_w         = create_layer_w(PARAKEET_TENSOR_ENC_ATTN_K_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, n_audio_state), i);
++        layer.attn_v_w         = create_layer_w(PARAKEET_TENSOR_ENC_ATTN_V_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, n_audio_state), i);
++        layer.attn_out_w       = create_layer_w(PARAKEET_TENSOR_ENC_ATTN_OUT_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, n_audio_state), i);
+         layer.attn_pos_w       = create_tensor(PARAKEET_TENSOR_ENC_ATTN_POS_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, n_audio_state), i);
+         ggml_format_name(layer.attn_pos_w, "enc_%d_attn_pos_w", i);
+ 
+         // Feed forward 2
+         layer.norm_ff2_w    = create_tensor(PARAKEET_TENSOR_ENC_NORM_FF2_WEIGHT, ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_audio_state), i);
+         layer.norm_ff2_b    = create_tensor(PARAKEET_TENSOR_ENC_NORM_FF2_BIAS, ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_audio_state), i);
+-        layer.ff2_linear1_w = create_tensor(PARAKEET_TENSOR_ENC_FF2_LINEAR1_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, 4*n_audio_state), i);
+-        layer.ff2_linear2_w = create_tensor(PARAKEET_TENSOR_ENC_FF2_LINEAR2_WEIGHT, ggml_new_tensor_2d(ctx, wtype, 4*n_audio_state, n_audio_state), i);
++        layer.ff2_linear1_w = create_layer_w(PARAKEET_TENSOR_ENC_FF2_LINEAR1_WEIGHT, ggml_new_tensor_2d(ctx, wtype, n_audio_state, 4*n_audio_state), i);
++        layer.ff2_linear2_w = create_layer_w(PARAKEET_TENSOR_ENC_FF2_LINEAR2_WEIGHT, ggml_new_tensor_2d(ctx, wtype, 4*n_audio_state, n_audio_state), i);
+ 
+         // Output norm
+         layer.norm_out_w = create_tensor(PARAKEET_TENSOR_ENC_NORM_OUT_WEIGHT, ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_audio_state), i);
+@@ -1489,6 +1729,20 @@ static bool parakeet_model_load(struct parakeet_model_loader * loader, parakeet_
+                 return false;
+             }
+ 
++            if (wctx.model.stream.enabled) {
++                auto it = wctx.model.stream.index.find(tensor);
++                if (it != wctx.model.stream.index.end()) {
++                    // in streaming: annota dove sta nel file e salta i byte
++                    auto & rec = wctx.model.stream.layers[it->second.first][it->second.second];
++                    rec.off    = (size_t) g_stream_fin->tellg();
++                    rec.nbytes = ggml_nbytes(tensor);
++                    g_stream_fin->seekg((std::streamoff) rec.nbytes, std::ios::cur);
++                    total_size += rec.nbytes;
++                    n_loaded++;
++                    continue;
++                }
++            }
++
+             if (ggml_backend_buffer_is_host(tensor->buffer)) {
+                 // for the CPU and Metal backend, we can read directly into the tensor
+                 loader->read(loader->context, tensor->data, ggml_nbytes(tensor));
+@@ -1521,6 +1775,56 @@ static bool parakeet_model_load(struct parakeet_model_loader * loader, parakeet_
+         ggml_backend_buffer_set_usage(buf, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+     }
+ 
++    // streaming: due slot grandi quanto lo strato più grande; ogni strato punta allo slot il%2
++    if (wctx.model.stream.enabled) {
++        auto & st = wctx.model.stream;
++        ggml_backend_buffer_type_t buft = st.buft ? st.buft : ggml_backend_cpu_buffer_type();
++        if (getenv("PARAKEET_STREAM_NOREPACK")) {
++            buft = ggml_backend_cpu_buffer_type();
++        }
++        PARAKEET_LOG_INFO("%s: streaming: slot di tipo %s\n", __func__, ggml_backend_buft_name(buft));
++        const size_t align = ggml_backend_buft_get_alignment(buft);
++        size_t slot_size = 0;
++        size_t streamed  = 0;
++        for (auto & layer : st.layers) {
++            size_t sz = 0;
++            for (auto & r : layer) {
++                sz += GGML_PAD(ggml_backend_buft_get_alloc_size(buft, r.t), align);
++                streamed += r.nbytes;
++            }
++            slot_size = std::max(slot_size, sz);
++        }
++        for (int s = 0; s < 2; ++s) {
++            st.slot[s] = ggml_backend_buft_alloc_buffer(buft, slot_size);
++            if (!st.slot[s]) {
++                PARAKEET_LOG_ERROR("%s: impossibile allocare lo slot di streaming\n", __func__);
++                return false;
++            }
++            ggml_backend_buffer_set_usage(st.slot[s], GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
++        }
++        for (int il = 0; il < st.n_layer; ++il) {
++            ggml_backend_buffer_t b = st.slot[il % 2];
++            char * base = (char *) ggml_backend_buffer_get_base(b);
++            size_t off = 0;
++            for (auto & r : st.layers[il]) {
++                if (ggml_backend_tensor_alloc(b, r.t, base + off) != GGML_STATUS_SUCCESS) {
++                    PARAKEET_LOG_ERROR("%s: impossibile assegnare il tensore allo slot\n", __func__);
++                    return false;
++                }
++                off += GGML_PAD(ggml_backend_buft_get_alloc_size(buft, r.t), align);
++            }
++        }
++        if (!st.file.open(g_stream_path)) {
++            PARAKEET_LOG_ERROR("%s: impossibile aprire '%s' per lo streaming\n", __func__, g_stream_path.c_str());
++            return false;
++        }
++        if (st.drop_cache) {
++            st.file.drop(0, 0); // via dalla cache i byte letti al caricamento (0 = tutto il file)
++        }
++        PARAKEET_LOG_INFO("%s: streaming: %.1f MB dell'encoder su disco, in RAM 2 slot da %.1f MB\n",
++                __func__, streamed / 1e6, slot_size / 1e6);
++    }
++
+     wctx.t_load_us = ggml_time_us() - t_start_us;
+ 
+     return true;
+@@ -1963,6 +2267,7 @@ static struct ggml_cgraph * parakeet_build_graph_encode(parakeet_context & pctx,
+ 
+         cur = ggml_norm(ctx0, cur, hparams.eps);
+         cur = ggml_add(ctx0, ggml_mul(ctx0, cur, layer.norm_out_w), layer.norm_out_b);
++        ggml_format_name(cur, "enc_%d_out", il); // usato dallo streaming dei pesi
+     }
+ 
+     ggml_set_name(cur, "encoder_out");
+@@ -2094,7 +2399,20 @@ static bool parakeet_encode_internal(
+         ggml_backend_tensor_set(rel_pos_t, pos.data(), 0, pos.size() * sizeof(float));
+     }
+ 
+-    if (!ggml_graph_compute_helper(sched, gf, n_threads)) {
++    auto & stream = pctx.model.stream;
++    if (stream.enabled) {
++        stream.begin();
++        ggml_backend_sched_set_eval_callback(sched, parakeet_stream_eval_cb, &stream);
++    }
++
++    const bool ok = ggml_graph_compute_helper(sched, gf, n_threads);
++
++    if (stream.enabled) {
++        stream.wait();
++        ggml_backend_sched_set_eval_callback(sched, nullptr, nullptr);
++    }
++
++    if (!ok) {
+         return false;
+     }
+ 
+@@ -3086,8 +3404,13 @@ struct parakeet_context * parakeet_init_from_file_with_params_no_state(const cha
+         fin->close();
+     };
+ 
++    g_stream_path = path_model;
++    g_stream_fin  = &fin;
++
+     auto ctx = parakeet_init_with_params_no_state(&loader, params);
+ 
++    g_stream_fin = nullptr;
++
+     if (ctx) {
+         ctx->path_model = path_model;
+     }
+@@ -3454,6 +3777,11 @@ void parakeet_print_timings(struct parakeet_context * ctx) {
+ 
+     PARAKEET_LOG_INFO("\n");
+     PARAKEET_LOG_INFO("%s:     load time = %8.2f ms\n", __func__, ctx->t_load_us / 1000.0f);
++    if (ctx->model.stream.enabled) {
++        const auto & st = ctx->model.stream;
++        PARAKEET_LOG_INFO("%s:   stream io = %8.2f ms (attesa del calcolo %8.2f ms), %.1f MB letti\n", __func__,
++                st.t_io_us / 1000.0f, st.t_wait_us / 1000.0f, st.bytes_read / 1e6);
++    }
+     if (ctx->state != nullptr) {
+ 
+         const int32_t n_sample  = std::max(1, ctx->state->n_sample);

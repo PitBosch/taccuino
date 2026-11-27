@@ -12,6 +12,7 @@ Il resto di Taccuino importa solo da questo modulo. Ogni cartella espone la stes
   mic_users(ignore_apps, ignore_pids)  app che stanno usando il microfono
   install_service() / uninstall_service()  servizio all'accesso (systemd utente / Utilità di pianificazione)
   ffmpeg_hint                          come installare ffmpeg
+  native_lib_name, build_hint          nome della libreria Parakeet e come installare git/cmake/compilatore
 
 Per aggiungere un sistema operativo basta una nuova cartella con questa interfaccia.
 """

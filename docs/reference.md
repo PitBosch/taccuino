@@ -103,11 +103,13 @@ I termini in `taccuino config vocabulary "…"` si aggiungono in testa.
 
 ```
 taccuino doctor                    controlla i requisiti (sola lettura)
-taccuino setup [--yes] [--model turbo-int8|turbo-int4|small-int8|small-int4|base-int8] [--profile xe|npu|cpu]
+taccuino setup [--yes] [--model parakeet-q4|turbo-int8|turbo-int4|small-int8|small-int4|base-int8]
+               [--profile parakeet|xe|npu|cpu]
                [--output-dir DIR] [--download] [--with-diarization] [--service]
 taccuino status | start [titolo] | stop | split [DIR [MM:SS]] | note "testo" | list
 taccuino process FILE|DIR          elabora un file audio/video o una cartella riunione
 taccuino summarize DIR             rigenera solo le note di Claude
+taccuino parakeet-build            compila la libreria di Parakeet (whisper.cpp; serve git, cmake, compilatore C++)
 taccuino install-service | uninstall-service | quit
 taccuino config [CHIAVE [VALORE]]  mostra o cambia le impostazioni
 ```
@@ -118,7 +120,7 @@ taccuino config [CHIAVE [VALORE]]  mostra o cambia le impostazioni
 
 | chiave | default | note |
 |---|---|---|
-| `profile` | `xe` | `xe` (GPU), `npu`, `cpu` |
+| `profile` | `xe` | `parakeet` (CPU, pochissima RAM), `xe` (GPU), `npu`, `cpu` |
 | `asr_model` | — | sostituisce il modello del profilo (repo OpenVINO su Hugging Face) |
 | `language` | `it` | `en`, oppure `auto` (sconsigliato: Whisper allucina in inglese sui silenzi) |
 | `output_dir` | `Documenti/Taccuino` | dove vanno le note (un vault Obsidian va bene) |
@@ -157,6 +159,29 @@ Modelli che girano con `openvino_genai` 2026.4 (repo `OpenVINO/…` su Hugging F
 
 Benchmark su Iris Xe (clip italiana di 2 min, `scripts/bench_asr.py`): Whisper turbo int8 RTF 0,13; Qwen3-ASR 1.7B int8
 RTF 0,45. WER su 120 frasi FLEURS italiane: Whisper turbo 2,91%, Qwen3-ASR 1.7B 3,43%.
+
+### Parakeet (profilo `parakeet`)
+
+Parakeet TDT 0.6B v3 (NVIDIA, 25 lingue europee, lingua riconosciuta da sola) su whisper.cpp in **CPU**, con una
+patch nostra (`native/`): le grandi matrici dell'encoder non restano in RAM ma si leggono dal file strato per strato,
+mentre si calcola lo strato precedente (2 slot da ~14 MB). Non ha prompt: il vocabolario lo usa Haiku quando rivede
+il testo (correzione live e nota finale).
+
+```
+taccuino parakeet-build               # una volta: scarica whisper.cpp, applica la patch, compila
+taccuino config profile parakeet
+taccuino download                     # modello ggml q4_0, ~340 MB su disco
+```
+
+Linux: `sudo apt install git cmake g++`. Windows: Git, CMake e Visual Studio Build Tools (C++); compilazione su
+Windows **non ancora provata**. Misurato su i5-1145G7, 120 frasi FLEURS italiane e 60 clip live da 1–12 s:
+
+| | WER | latenza live media | RAM (processo intero) |
+|---|---|---|---|
+| Whisper turbo int8, GPU (`xe`) | 2,63% | 2,25 s | ~1,6 GB (processo + buffer GPU) |
+| **Parakeet q4 streaming, CPU** | 3,72% | 0,51 s | ~230 MB nel live, picco ~370 MB sulla nota finale |
+
+Audio lungo: 5 min in 21 s (i turni oltre 30 s si tagliano nel punto più silenzioso).
 
 **Diarization**: sherpa-onnx (~35 MB, offline, CPU). Serve con `final_transcribe true` (il solo modello di embedding
 anche per le voci della call nel live); si scarica con

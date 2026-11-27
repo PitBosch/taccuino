@@ -216,8 +216,8 @@ class LiveTranscript:
 
     def load(self, log=lambda _: None):
         if self.asr is None:
-            from .engines import ASR
-            self.asr = ASR(*self.s.asr, language=self.s.language, quiet=True)
+            from .engines import make_asr
+            self.asr = make_asr(*self.s.asr, language=self.s.language, quiet=True)
             self.refresh_vocab()
 
     # ---------- trascrizione ----------

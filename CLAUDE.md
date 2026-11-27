@@ -1,7 +1,7 @@
 # Taccuino — guida per chi modifica il codice
 
 Registratore di riunioni sempre attivo (Windows e Linux): daemon + live worker + console/TUI + pipeline. Trascrive con
-Whisper (OpenVINO GenAI, GPU/NPU/CPU Intel); note, titoli, scelta della cartella e correzioni le fa Haiku via
+Whisper (OpenVINO GenAI, GPU/NPU/CPU Intel) o Parakeet (whisper.cpp in CPU, `native/`); note, titoli, scelta della cartella e correzioni le fa Haiku via
 `claude -p`. Per l'installazione vedi `claude_install.md`; per l'uso `README.md` e `docs/`.
 
 ## Regola d'oro: il codice che dipende dal sistema operativo sta solo in `taccuino/platforms/`
@@ -24,7 +24,8 @@ Whisper (OpenVINO GenAI, GPU/NPU/CPU Intel); note, titoli, scelta della cartella
 | `pipeline.py` | `process_meeting`: nota finale; `resummarize` |
 | `summarize.py` | `run_claude`, prompt di nota, `choose_folder`, `existing_folders` |
 | `split.py` | divisione di registrazioni con più riunioni (Haiku, manuale, dal vivo) |
-| `engines.py` | `ASR` (retry su device perso), `Diarizer` |
+| `engines.py` | `make_asr` → `ASR` (OpenVINO, retry su device perso) o `ParakeetASR`; `Diarizer` |
+| `native.py`, `native/` | `taccuino parakeet-build`: whisper.cpp al commit fissato + patch (streaming dei pesi, libreria `taccuino-asr`) |
 | `vocab.py` | vocabolario dal vault + `Vocabolario.md` di progetto (`prompt_text`) |
 | `setup_wizard.py` | `taccuino doctor` e `taccuino setup` |
 | `config.py` | `Settings`, profili e catalogo modelli (`ASR_PROFILES`, `ASR_MODELS`) |

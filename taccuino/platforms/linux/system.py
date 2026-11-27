@@ -8,6 +8,8 @@ IS_WIN = False
 NO_WINDOW: dict = {}
 claude_exe_name = "claude"
 ffmpeg_hint = ""
+native_lib_name = "libtaccuino-asr.so"  # libreria Parakeet compilata da `taccuino parakeet-build`
+build_hint = "sudo apt install git cmake g++"
 
 
 def try_lock(f) -> bool:
