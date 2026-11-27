@@ -201,13 +201,14 @@ class Console:
                 continue
             if trailing < 0.3:
                 last_speech = time.time()
-            lines, fixed = lt.lines(), lt.cleaned()
+            lines, fixed, names = lt.lines(), lt.cleaned(), lt.names()
             new = [i for i in sorted(fixed) if i not in shown and i < len(lines)]
             if first:  # all'apertura solo le ultime righe
                 shown.update(new[:-10])
                 new = new[-10:]
             shown.update(new)
-            out = [_fmt(Line(lines[i].start, lines[i].end, lines[i].speaker, fixed[i])) for i in new if fixed[i]]
+            out = [_fmt(Line(lines[i].start, lines[i].end, lt.who(lines[i].speaker, names), fixed[i]))
+                   for i in new if fixed[i]]
             raw = " ".join(lines[i].text for i in range(len(lines)) if i not in fixed)
             self._draw(out if self.show_live else [], draft=(raw + " " + draft).strip())
             if lt.driving and not cleaning.is_set():

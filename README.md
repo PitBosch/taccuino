@@ -11,6 +11,7 @@ Claude Code (`claude -p --model haiku`).
 1. Un servizio resta in ascolto. Quando un'app (Teams, Meet, Zoom, Slack…) apre il microfono, registra
    **microfono + audio di sistema** su due canali. Quando lo rilascia, si ferma.
 2. **Durante la call** trascrive in streaming e, ogni 15 minuti, Haiku corregge il testo e aggiunge appunti.
+   Le persone remote vengono distinte dalla voce ("Call A", "Call B", …) e Haiku dà loro un nome quando si capisce.
 3. **A fine call** Haiku scrive la nota finale (sintesi, decisioni, azioni, partecipanti), sceglie titolo e
    **sottocartella** guardando cosa c'è nell'archivio (e scrive perché), e la salva come file Markdown.
 

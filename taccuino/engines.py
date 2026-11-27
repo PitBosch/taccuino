@@ -42,6 +42,12 @@ def ensure_diarization_models() -> tuple[str, str]:
     return str(seg), str(emb)
 
 
+def embedding_model() -> str | None:
+    """Percorso del modello di embedding speaker se è già scaricato (non scarica nulla: serve al live)."""
+    p = MODELS_DIR / EMBEDDING_URL.rsplit("/", 1)[1]
+    return str(p) if p.exists() else None
+
+
 _LANG_NAMES = {"it": "Italian", "en": "English", "fr": "French", "de": "German", "es": "Spanish"}
 
 

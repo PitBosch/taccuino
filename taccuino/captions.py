@@ -153,7 +153,8 @@ class Captions:
                     i, l, ok = val
                     if l.text:
                         L, T = f"L{i}", f"T{i}"
-                        self._append([(self.fmt_ts(l.start) + " ", ("ts", L)), (l.speaker, (l.speaker, L)),
+                        tag = "Io" if l.speaker == "Io" else "Call"  # voci e nomi della call: stesso colore
+                        self._append([(self.fmt_ts(l.start) + " ", ("ts", L)), (l.speaker, (tag, L)),
                                       ("  ", L), (l.text, (T, L) if ok else (T, L, "raw")), ("\n", L)])
                 elif kind == "fix":  # Haiku ha corretto la frase: sostituisci sul posto
                     i, text = val
@@ -218,7 +219,7 @@ class Captions:
             if trailing < 0.3:
                 last_speech = time.time()
             from .pipeline import Line
-            lines, fixed = lt.lines(), lt.cleaned()
+            lines, fixed, names = lt.lines(), lt.cleaned(), lt.names()
             if not self.shown and not self.fixed_shown:  # all'apertura mostra solo le ultime righe
                 self.shown.update(range(max(0, len(lines) - 20)))
                 self.fixed_shown.update(i for i in fixed if i in self.shown)
@@ -228,7 +229,7 @@ class Captions:
                     ok = i in fixed
                     if ok:
                         self.fixed_shown.add(i)
-                    self.q.put(("line", (i, Line(l.start, l.end, l.speaker, fixed.get(i, l.text)), ok)))
+                    self.q.put(("line", (i, Line(l.start, l.end, lt.who(l.speaker, names), fixed.get(i, l.text)), ok)))
                 elif i in fixed and i not in self.fixed_shown:
                     self.fixed_shown.add(i)
                     self.q.put(("fix", (i, fixed[i])))

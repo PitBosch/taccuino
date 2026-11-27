@@ -19,7 +19,8 @@ di trascrizione o speaker scambiati: correggi mentalmente gli errori evidenti ma
 
 Etichette: "Io" è l'utente; "In sala N" sono persone nella stessa stanza dell'utente;
 "Speaker N" sono partecipanti remoti della call. Se dal contesto si capisce il nome reale di uno speaker
-(es. qualcuno lo chiama per nome), usalo nella forma "Nome (Speaker N)".
+(es. qualcuno lo chiama per nome), usalo nella forma "Nome (Speaker N)". Nella trascrizione live i partecipanti
+remoti sono "Call", "Call A", "Call B", … (voci riconosciute dal suono, possono sbagliare) o già un nome.
 
 Data: {date} · Durata: {duration} min · App: {apps}
 {extra}
@@ -62,7 +63,8 @@ TRANSCRIPT:
 
 ASK_PROMPT = """Stai aiutando l'utente durante (o subito dopo) una riunione. Qui sotto c'è il transcript
 automatico {scope}: può contenere errori di trascrizione, correggi mentalmente quelli evidenti ma NON inventare.
-"Io" è l'utente, "Call" sono i partecipanti remoti (le altre etichette sono speaker distinti).
+"Io" è l'utente, "Call" sono i partecipanti remoti ("Call A", "Call B", … o un nome: voci distinte della call;
+le altre etichette sono speaker distinti).
 {extra}
 Rispondi in modo breve e diretto, nella lingua della riunione, in testo semplice adatto a un terminale
 (elenchi con "-", niente tabelle). Non usare strumenti, non leggere file: hai già tutto il necessario.

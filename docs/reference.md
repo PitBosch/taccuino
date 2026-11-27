@@ -4,7 +4,25 @@
 
 - **Io**: lo speaker con più parlato sul canale microfono. **In sala N**: altre voci sul microfono (riunioni dal vivo).
 - **Speaker N**: partecipanti remoti (canale di sistema). Claude prova a dedurre i nomi dal contesto ("Marco (Speaker 2)").
-- Durante la call le righe live sono solo **Io** (microfono) e **Call** (sistema), senza diarization.
+- Durante la call le righe live sono **Io** (microfono) e, per il canale di sistema, **Call A**, **Call B**, … (voci
+  distinte, vedi sotto) oppure **Call** se la voce non si riconosce o la funzione è spenta. Niente diarization completa.
+
+### Voci della call nel live
+
+Con `live_speakers` (default on) ogni riga "Call" fissata riceve un embedding vocale (wespeaker con sherpa-onnx, CPU,
+1 thread, al massimo i primi 3 s di parlato) confrontato con le voci già sentite: similarità coseno ≥
+`speaker_threshold` → stessa voce, altrimenti voce nuova (max 8). Le righe con meno di 1 s di parlato non creano voci
+(restano "Call" se non somigliano a nessuna). Lo stato è in `live.speakers.json`, così le etichette restano le stesse
+se il worker riparte. Quando Haiku corregge il testo (stessa chiamata, nessun costo in più) propone un nome per una
+voce solo se il testo lo rende chiaro (si presenta, viene chiamata per nome): `live.names.json`. Console, sottotitoli,
+appunti e nota finale mostrano il nome se c'è, altrimenti "Call A".
+
+- Costo misurato (i5-1145G7): ~85 ms di CPU per riga (≤ 3 s di parlato), ~0,2 s per caricare il modello alla prima
+  riga Call, ~100 MB di RAM in più nel live worker. Il modello serve già scaricato (`taccuino download` o
+  `taccuino setup --download --with-diarization`); se manca, o manca sherpa-onnx, le righe restano "Call".
+- **Calibrare `speaker_threshold`** (0,55 è un valore iniziale scelto su audio di prova, non su call vere con più
+  persone): se la stessa persona finisce divisa in più voci, abbassala (es. 0,5); se persone diverse finiscono nella
+  stessa voce, alzala (es. 0,6). Le voci già create in una riunione restano.
 - Con gli altoparlanti le righe duplicate dall'eco vengono scartate per similarità. Le cuffie restano meglio.
 
 ## Durante la call
@@ -114,6 +132,7 @@ taccuino config [CHIAVE [VALORE]]  mostra o cambia le impostazioni
 | `final_transcribe` | false | true = a fine call ritrascrive tutto con diarization (più lento) |
 | `num_speakers` / `cluster_threshold` | -1 / 0.6 | solo con `final_transcribe` |
 | `live_clean_seconds` / `live_notes_minutes` | 900 / 15 | correzione e appunti durante la call (0 = solo a fine call / mai) |
+| `live_speakers` / `speaker_threshold` | true / 0.55 | voci distinte "Call A/B…" nel live; soglia di similarità (più alta = più voci) |
 | `keep_audio_days` | 14 | 0 = cancella l'audio subito dopo l'elaborazione |
 
 ## Prestazioni misurate (i5-1145G7, Iris Xe 80 EU, 16 GB)
@@ -139,7 +158,8 @@ Modelli che girano con `openvino_genai` 2026.4 (repo `OpenVINO/…` su Hugging F
 Benchmark su Iris Xe (clip italiana di 2 min, `scripts/bench_asr.py`): Whisper turbo int8 RTF 0,13; Qwen3-ASR 1.7B int8
 RTF 0,45. WER su 120 frasi FLEURS italiane: Whisper turbo 2,91%, Qwen3-ASR 1.7B 3,43%.
 
-**Diarization**: sherpa-onnx (~35 MB, offline, CPU). Serve solo con `final_transcribe true`; si scarica con
+**Diarization**: sherpa-onnx (~35 MB, offline, CPU). Serve con `final_transcribe true` (il solo modello di embedding
+anche per le voci della call nel live); si scarica con
 `taccuino download` (insieme a Whisper) o `taccuino setup --download --with-diarization`.
 
 **NPU**: `taccuino config profile npu` fa girare Whisper sulla NPU (serve OpenVINO ≥ 2026.4 e il driver Intel NPU).
@@ -148,6 +168,7 @@ Su Core Ultra 7 155H abbiamo osservato `DEVICE_LOST` in call lunghe: non è il p
 ## Dati
 
 - `<dati>/meetings/<data>/`: `audio.flac` (L=mic, R=sistema), `live.jsonl` (righe live), `live.clean.json` (correzioni),
+  `live.speakers.json` (voci della call), `live.names.json` (nomi delle voci),
   `transcript.json`, `notes.txt`, `meta.json` (titolo, cartella e motivo, app, divisione).
   `<dati>` = `%LOCALAPPDATA%\taccuino` su Windows, `~/.local/share/taccuino` su Linux (o `TACCUINO_HOME`).
 - `<output_dir>/…/*.md`: note finali.

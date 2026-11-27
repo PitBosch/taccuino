@@ -91,6 +91,10 @@ class Settings:
     # a fine call: False = nota dalla trascrizione live (veloce, niente GPU); True = ritrascrive tutto con
     # diarization (speaker separati, più preciso, qualche minuto di GPU)
     final_transcribe: bool = False
+    # voci distinte sul canale Call nel live ("Call A", "Call B", …; Haiku dà loro un nome se si capisce dal testo)
+    live_speakers: bool = True
+    # similarità coseno minima per dire "stessa voce" (più alto = più voci); da calibrare su call vere
+    speaker_threshold: float = 0.55
 
     # --- Jira (tramite il connettore Atlassian di Claude Code) ---
     jira_project: str = ""          # chiave del progetto (vuoto = il tuo progetto personale)

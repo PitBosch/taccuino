@@ -19,7 +19,8 @@ Whisper (OpenVINO GenAI, GPU/NPU/CPU Intel); note, titoli, scelta della cartella
 | modulo | cosa fa |
 |---|---|
 | `daemon.py` | ciclo principale: rileva il mic, avvia/ferma la registrazione, coda di elaborazione, comandi (`control`) |
-| `live.py`, `live_worker.py` | trascrizione in streaming (`LiveTranscript`), correzione di Haiku (`Cleaner`), appunti live (`LiveNotes`) |
+| `live.py`, `live_worker.py` | trascrizione in streaming (`LiveTranscript`), correzione di Haiku (`Cleaner`, anche i nomi delle voci), appunti live (`LiveNotes`) |
+| `speakers.py` | voci "Call A/B…" nel live: embedding wespeaker leggero + clustering online (`live.speakers.json`) |
 | `pipeline.py` | `process_meeting`: nota finale; `resummarize` |
 | `summarize.py` | `run_claude`, prompt di nota, `choose_folder`, `existing_folders` |
 | `split.py` | divisione di registrazioni con più riunioni (Haiku, manuale, dal vivo) |
