@@ -175,7 +175,7 @@ def main(argv=None):
             print(f"microfono usato da: {', '.join(st['mic_users']) or 'nessuno'}")
             if st["processing"]:
                 print(f"elaborazione: {st['processing']} (+{st['queue']} in coda)")
-        print(f"profilo: {s.profile} ({s.asr[0].split("/")[-1]} @ {s.asr[1]}), output: {s.output_dir}")
+        print(f"profilo: {s.profile} ({s.asr[0].split('/')[-1]} @ {s.asr[1]}), output: {s.output_dir}")
 
     elif a.cmd == "start":
         _send(f"start {a.title}".strip()); print("● registrazione avviata")
