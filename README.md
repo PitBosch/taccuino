@@ -5,8 +5,11 @@
 <h1 align="center">Taccuino</h1>
 
 Registratore di riunioni **sempre attivo**, ispirato a Granola, **senza bot** che entrano nella call.
-Funziona su **Windows** e **Linux**. Trascrive in locale (Whisper su GPU/NPU Intel con OpenVINO); le note le scrive
-Claude Code (`claude -p --model haiku`).
+Funziona su **Windows** e **Linux**. Trascrive in locale, con uno di due motori:
+- **Parakeet** su CPU (whisper.cpp): circa 230 MB di RAM e mezzo secondo per frase;
+- **Whisper** su GPU o NPU Intel (OpenVINO).
+
+Haiku, tramite Claude Code (`claude -p --model haiku`), rivede il testo con il tuo vocabolario e scrive le note.
 
 1. Un servizio resta in ascolto. Quando un'app (Teams, Meet, Zoom, Slack…) apre il microfono, registra
    **microfono + audio di sistema** su due canali. Quando lo rilascia, si ferma.
@@ -20,7 +23,7 @@ Claude Code (`claude -p --model haiku`).
 
 ```
  microfono ─┐                         ┌─ L: tu + chi è in stanza ─┐
-            ├─ audio.flac (stereo) ───┤                           ├─ Whisper (GPU) ─▶ live.jsonl ─▶ Haiku ─▶ nota .md
+            ├─ audio.flac (stereo) ───┤                           ├─ Parakeet/Whisper ─▶ live.jsonl ─▶ Haiku ─▶ nota .md
  sistema  ──┘    (durante la call)    └─ R: partecipanti remoti  ─┘
 ```
 
@@ -43,6 +46,16 @@ taccuino setup --download --service   # sceglie profilo e modello per la tua mac
 taccuino                  # console sulla riunione in corso (o l'ultima)
 ```
 
+Per usare Parakeet al posto di Whisper:
+
+```bash
+taccuino parakeet-build            # una volta sola: compila whisper.cpp con la nostra patch (serve git, cmake e un compilatore C++)
+taccuino config profile parakeet
+taccuino download                  # modello q4_0, circa 340 MB su disco
+```
+
+Il confronto misurato tra i due motori è in [docs/reference.md](docs/reference.md#parakeet-profilo-parakeet).
+
 Uso quotidiano:
 
 ```bash
@@ -61,6 +74,7 @@ Le note finiscono in `output_dir` (di default `Documenti/Taccuino`; `taccuino se
 taccuino/                 pacchetto Python (logica comune, uguale su ogni sistema)
   platforms/linux/        tutto ciò che dipende da Linux: cattura audio (ffmpeg+PipeWire), rilevamento mic, systemd
   platforms/windows/      tutto ciò che dipende da Windows: cattura WASAPI, registro "privacy microfono", Utilità di pianificazione
+native/                   patch di whisper.cpp per Parakeet (pesi letti dal disco strato per strato) e commit fissato
 docs/
   windows/README.md       installazione, requisiti e limiti su Windows
   linux/README.md         installazione, requisiti e limiti su Linux
